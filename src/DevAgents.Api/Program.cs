@@ -122,5 +122,132 @@ app.MapPost("/api/chat/stream", async (ChatRequest req, AgentPipeline pipeline, 
         try { await Emit(new PipelineEvent("error", "", ex.Message)); } catch { }
     }
 });
+app.MapPost("/v1/chat/completions", async (HttpContext http, AgentPipeline pipeline) =>
+{
+    http.Response.ContentType = "text/event-stream";
+    http.Response.Headers.CacheControl = "no-cache";
+    http.Response.Headers["X-Accel-Buffering"] = "no";
+    var ct = http.RequestAborted;
+
+    // 1. Continue'dan gelen JSON verisini oku
+    using var reader = new StreamReader(http.Request.Body);
+    var bodyText = await reader.ReadToEndAsync(ct);
+    
+    using var doc = JsonDocument.Parse(bodyText);
+    var root = doc.RootElement;
+
+    string userMessage = "";
+    if (root.TryGetProperty("messages", out var messagesEl) && messagesEl.ValueKind == JsonValueKind.Array)
+    {
+        var lastMsg = messagesEl.EnumerateArray().LastOrDefault();
+        if (lastMsg.ValueKind != JsonValueKind.Undefined && lastMsg.TryGetProperty("content", out var contentEl))
+        {
+            userMessage = contentEl.GetString() ?? "";
+        }
+    }
+
+    if (string.IsNullOrWhiteSpace(userMessage))
+    {
+        http.Response.StatusCode = 400;
+        await http.Response.WriteAsync("Prompt/Message bulunamadı.", ct);
+        return;
+    }
+
+    bool isStream = !root.TryGetProperty("stream", out var streamEl) || streamEl.GetBoolean();
+
+    // ChatRequest record tanımınıza uygun nesne oluşturuluyor
+    var req = new ChatRequest(Question: userMessage);
+    var responseId = "chatcmpl-" + Guid.NewGuid().ToString("N");
+
+    async Task SendOpenAiChunkAsync(string? textDelta, string? finishReason = null)
+    {
+        var chunk = new
+        {
+            id = responseId,
+            @object = "chat.completion.chunk",
+            created = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+            model = "csharp-multi-agent",
+            choices = new[]
+            {
+                new
+                {
+                    index = 0,
+                    delta = textDelta != null ? new { content = textDelta } : new object(),
+                    finish_reason = finishReason
+                }
+            }
+        };
+
+        await http.Response.WriteAsync($"data: {JsonSerializer.Serialize(chunk)}\n\n", ct);
+        await http.Response.Body.FlushAsync(ct);
+    }
+
+    try
+    {
+        if (isStream)
+        {
+            var result = await pipeline.RunAsync(req, async evt =>
+            {
+                // Streaming esnasında token geldikçe anlık ekrana basıyoruz
+                if (evt.Type == "token" && !string.IsNullOrEmpty(evt.Text))
+                {
+                    await SendOpenAiChunkAsync(evt.Text);
+                }
+                else if (evt.Type == "stage_start")
+                {
+                    await SendOpenAiChunkAsync($"\n\n> 🤖 **{evt.Text ?? evt.Stage}** çalışıyor...\n\n");
+                }
+            }, ct);
+
+            // Eğer event akışı esnasında nihai çıktı verilmediyse FinalMarkdown basılıyor
+            if (result != null && !string.IsNullOrEmpty(result.FinalMarkdown))
+            {
+                 await SendOpenAiChunkAsync(result.FinalMarkdown);
+            }
+
+            await SendOpenAiChunkAsync(null, "stop");
+            await http.Response.WriteAsync("data: [DONE]\n\n", ct);
+            await http.Response.Body.FlushAsync(ct);
+        }
+        else
+        {
+            var result = await pipeline.RunAsync(req, _ => Task.CompletedTask, ct);
+            
+            var nonStreamResponse = new
+            {
+                id = responseId,
+                @object = "chat.completion",
+                created = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                model = "csharp-multi-agent",
+                choices = new[]
+                {
+                    new
+                    {
+                        index = 0,
+                        message = new { role = "assistant", content = result?.FinalMarkdown ?? "" },
+                        finish_reason = "stop"
+                    }
+                }
+            };
+
+            http.Response.ContentType = "application/json";
+            await http.Response.WriteAsync(JsonSerializer.Serialize(nonStreamResponse), ct);
+        }
+    }
+    catch (OperationCanceledException) { /* İstemci bağlantıyı kesti */ }
+    catch (Exception ex)
+    {
+        if (isStream)
+        {
+            await SendOpenAiChunkAsync($"\n\n[Hata]: {ex.Message}", "stop");
+            await http.Response.WriteAsync("data: [DONE]\n\n", ct);
+        }
+        else
+        {
+            http.Response.StatusCode = 500;
+            await http.Response.WriteAsync(JsonSerializer.Serialize(new { error = ex.Message }), ct);
+        }
+    }
+});
 
 app.Run();

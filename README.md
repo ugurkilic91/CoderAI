@@ -126,3 +126,21 @@ Sonuçta `finalMarkdown` (Türkçe rapor), `files` (ayrıştırılmış kod/test
 * Kod dosyalarını yazma işlemi yalnızca VS Code eklentisinde, sizin onayınızla yapılır; API proje dosyalarını değiştirmez.
 * Küçük (7B) modellerde format bozulabilir; bu durumda `Coder`/`Analyzer` için daha büyük model seçin ya da `NumCtx` değerini artırın.
 * `Workspace:AllowedRoots` boşsa API makinedeki her klasörü okuyabilir. Yalnızca localhost'a açık tutun; Docker kurulumunda otomatik olarak `/workspace` ile sınırlıdır.
+
+
+
+name: Main Config
+version: 1.0.0
+schema: v1
+
+models:
+  - name: C# Multi-Agent Pipeline
+    provider: openai
+    model: csharp-multi-agent
+    apiBase: http://localhost:8080/v1
+    apiKey: NONE
+    roles:
+      - chat
+      - edit
+      - apply
+    default: true
