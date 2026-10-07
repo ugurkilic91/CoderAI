@@ -1,0 +1,17 @@
+{
+  "Ollama": {
+    "BaseUrl": "http://localhost:11434",
+    "Defaults": { "Model": "qwen2.5-coder:14b", "NumCtx": 16384 },
+    "Agents": {
+      "Router":         { "Model": "qwen3.5:9b" },
+      "Translator":     { "Model": "qwen3.5:9b" },
+      "Analyzer":       { "Model": "qwen2.5-coder:14b" },
+      "Coder":          { "Model": "qwen2.5-coder:14b" },
+      "Tester":         { "Model": "qwen2.5-coder:14b" },
+      "Reviewer":       { "Model": "qwen2.5-coder:14b" },
+      "BackTranslator": { "Model": "qwen3.5:9b" }
+    }
+  },
+  "Pipeline": { "MaxReviewIterations": 1 },
+  "Workspace": { "MaxContextChars": 24000 }
+}

@@ -1,0 +1,49 @@
+{
+  "name": "devagents-local",
+  "displayName": "DevAgents Local",
+  "description": "Yerel Ollama ajanlarıyla (analiz, kod, test, review) proje mimarisine uygun kod geliştirme.",
+  "version": "0.1.0",
+  "publisher": "local",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Other"],
+  "main": "./extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "commands": [
+      { "command": "devagents.ask", "title": "DevAgents: Soru sor / kod geliştir" },
+      { "command": "devagents.askSelection", "title": "DevAgents: Seçili kod hakkında sor" },
+      { "command": "devagents.applyLast", "title": "DevAgents: Son sonuçtaki dosyaları projeye uygula" },
+      { "command": "devagents.resetHistory", "title": "DevAgents: Konuşma geçmişini sıfırla" },
+      { "command": "devagents.openChat", "title": "DevAgents: Web sohbetini aç" }
+    ],
+    "menus": {
+      "editor/context": [
+        { "command": "devagents.askSelection", "when": "editorHasSelection", "group": "devagents" }
+      ]
+    },
+    "configuration": {
+      "title": "DevAgents",
+      "properties": {
+        "devagents.serverUrl": {
+          "type": "string",
+          "default": "http://localhost:8080",
+          "description": "DevAgents API adresi."
+        },
+        "devagents.contextMode": {
+          "type": "string",
+          "enum": ["inline", "path"],
+          "default": "inline",
+          "description": "inline: workspace dosyaları API'ye gönderilir (Docker ile de çalışır). path: yalnızca klasör yolu gönderilir (API aynı makinede ve yola erişebiliyor olmalı)."
+        },
+        "devagents.serverProjectPath": {
+          "type": "string",
+          "default": "",
+          "description": "contextMode=path iken API'nin gördüğü proje yolu (örn. Docker'da 'MyApp' veya '/workspace/MyApp'). Boşsa workspace yolu kullanılır."
+        },
+        "devagents.maxFiles": { "type": "number", "default": 400, "description": "inline modda gönderilecek en fazla dosya sayısı." },
+        "devagents.maxTotalKB": { "type": "number", "default": 3000, "description": "inline modda gönderilecek toplam en fazla boyut (KB)." },
+        "devagents.maxReviewIterations": { "type": "number", "default": 1, "description": "Review sonrası en fazla revizyon turu." }
+      }
+    }
+  }
+}

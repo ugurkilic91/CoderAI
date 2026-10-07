@@ -1,0 +1,46 @@
+# Kullanım:
+#   docker compose up -d --build                      # API + web arayüz (Ollama ana makinede çalışıyor)
+#   docker compose --profile with-ollama up -d --build  # Ollama'yı da konteyner olarak çalıştır
+#
+# .env dosyası (isteğe bağlı):
+#   PROJECTS_DIR=C:/src          # ajanların okuyacağı projelerin üst klasörü
+#   OLLAMA_URL=http://ollama:11434   # with-ollama profili için
+
+services:
+  devagents:
+    build: .
+    container_name: devagents
+    ports:
+      - "127.0.0.1:8080:8080"        # yalnızca bu makineden erişilir
+    environment:
+      - Ollama__BaseUrl=${OLLAMA_URL:-http://host.docker.internal:11434}
+      - Workspace__AllowedRoots__0=/workspace
+      - DOTNET_USE_POLLING_FILE_WATCHER=true   # bind mount'ta config değişikliklerini yakalar
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ${PROJECTS_DIR:-./projects}:/workspace:ro   # projeler salt-okunur bağlanır
+      - ./config:/app/config:ro                     # model seçimi: config/local.json
+      - ./src/DevAgents.Api/prompts:/app/prompts:ro # prompt'ları yeniden derlemeden düzenleyin
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["with-ollama"]
+    container_name: devagents-ollama
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - ollama:/root/.ollama
+    # NVIDIA GPU için aşağıyı açın:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+    restart: unless-stopped
+
+volumes:
+  ollama:

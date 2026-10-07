@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DevAgents — yerel kod geliştirme ajanları</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="side" id="side">
+      <header class="brand">
+        <h1>DevAgents</h1>
+        <div class="status" id="status" title="Ollama bağlantısı"><i></i><span>kontrol ediliyor…</span></div>
+      </header>
+
+      <section>
+        <label for="projectPath">Proje klasörü</label>
+        <input id="projectPath" list="projectList" placeholder="C:\src\MyApp  veya  /workspace/MyApp" autocomplete="off">
+        <datalist id="projectList"></datalist>
+        <button class="ghost" id="previewBtn" type="button">Bağlamı önizle</button>
+      </section>
+
+      <section>
+        <label for="extra">Ek bağlam / kurallar</label>
+        <textarea id="extra" rows="4" placeholder="Örn: Clean Architecture kullanıyoruz, MediatR ve FluentValidation var, Result&lt;T&gt; döndür."></textarea>
+      </section>
+
+      <section>
+        <label>Dosya ekle <small>(her zaman bağlama girer)</small></label>
+        <input type="file" id="fileInput" multiple hidden>
+        <button class="ghost" id="fileBtn" type="button">Dosya seç…</button>
+        <ul class="chips" id="fileList"></ul>
+      </section>
+
+      <details class="adv">
+        <summary>Pipeline ayarları</summary>
+        <div class="row">
+          <label for="mode">Çalışma modu</label>
+          <select id="mode">
+            <option value="auto">Otomatik (Router karar verir)</option>
+            <option value="full">Tam pipeline (tüm ajanlar)</option>
+          </select>
+        </div>
+        <div class="row">
+          <label for="iters">Review sonrası revizyon turu</label>
+          <input id="iters" type="number" min="0" max="5" value="1">
+        </div>
+        <div class="row check">
+          <input id="trOut" type="checkbox" checked>
+          <label for="trOut">Sonucu Türkçeye çevir</label>
+        </div>
+        <p class="hint">Varsayılan modeller <code>config/local.json</code> dosyasından gelir. Buradan yalnızca bu sohbet için değiştirebilirsiniz.</p>
+        <div id="modelSelects"></div>
+      </details>
+
+      <footer>
+        <button class="ghost" id="newChat" type="button">Yeni sohbet</button>
+      </footer>
+    </aside>
+
+    <main class="main">
+      <button class="menu" id="menuBtn" type="button" aria-label="Ayarlar">☰</button>
+      <div class="messages" id="messages">
+        <div class="empty" id="empty">
+          <h2>Ne geliştirelim?</h2>
+          <p>Soruyu Türkçe yazın. Sırayla çeviri, analiz, kodlama, test ve review ajanlarından geçip Türkçe sonuç döner.</p>
+          <ul>
+            <li><button type="button" class="sample">Sipariş iptal etme endpoint'i ekle; iptal edilen siparişin stoğu geri yüklensin.</button></li>
+            <li><button type="button" class="sample">UserService için FluentValidation kuralları yaz ve birim testlerini ekle.</button></li>
+          </ul>
+        </div>
+      </div>
+      <div class="composer">
+        <textarea id="input" rows="2" placeholder="İsteğinizi yazın…  (Enter: gönder, Shift+Enter: yeni satır)"></textarea>
+        <button id="sendBtn" type="button">Gönder</button>
+      </div>
+    </main>
+  </div>
+
+  <dialog id="ctxDialog">
+    <form method="dialog"><button class="close" aria-label="Kapat">✕</button></form>
+    <h3>Ajanlara gidecek proje bağlamı</h3>
+    <div id="ctxBody"></div>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>
