@@ -1,0 +1,10 @@
+# Only src/ goes into the image. Keep the build context small and free of local build output
+# (a local obj/ folder would replace the restore done inside the container).
+**/bin/
+**/obj/
+.git/
+.vs/
+.vscode/
+projects/
+tests/
+vscode-extension/

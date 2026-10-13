@@ -18,7 +18,7 @@ Türkçe soru → İngilizce → Router → [Cevap | Analiz → Kodlama → Test
 Router'ın kararı okunamazsa güvenli tarafta kalıp tam pipeline çalışır. Zorlamak için: arayüzde **Çalışma modu → Tam pipeline**,
 API'de `"options": { "mode": "full" }` veya `"options": { "stages": ["code","test"] }`. Karar kuralları `prompts/router.md` içindedir.
 
-* **C# / .NET 8** API + hazır **web sohbet arayüzü** (ChatGPT benzeri, canlı pipeline adımları)
+* **C# / .NET 10** API (**Clean Architecture**, bkz. [Mimari](#7-mimari-clean-architecture)) + hazır **web sohbet arayüzü** (ChatGPT benzeri, canlı pipeline adımları)
 * **Yerel Ollama**: her ajan için model/sıcaklık/context boyutu **config** dosyasından seçilir
 * **Proje bağlamı**: klasör yolu verirsiniz; mimari özeti (csproj, paketler, katmanlar, dosya ağacı) ve isteğe en uygun dosyalar ajanlara gider
 * **VS Code eklentisi** (API'yi kullanır) ve **docker compose**
@@ -60,7 +60,8 @@ Varsayılanlar `src/DevAgents.Api/appsettings.json` içindedir. **Kendi ayarlar�
 * Çözümleme sırası: web arayüzündeki o sohbete özel seçim → `Agents.<Ajan>` → `Defaults`
 * `BackTranslator` tanımlı değilse `Translator` ayarı kullanılır
 * Ortam değişkeniyle de verilebilir: `Ollama__Agents__Coder__Model=qwen2.5-coder:14b`
-* Ajanların sistem prompt'ları `src/DevAgents.Api/prompts/*.md` dosyalarındadır; **yeniden derlemeden** düzenleyebilirsiniz
+* Ajanların sistem prompt'ları `src/DevAgents.Api/prompts/*.md` dosyalarındadır ve her istekte yeniden okunur:
+  Docker'da klasör bağlı olduğu için değişiklik **anında** geçerlidir; `dotnet run` ile çalışırken bir sonraki derlemede çıktı klasörüne kopyalanır
 
 ## 3) Proje bağlamı nasıl çalışır?
 
@@ -77,7 +78,7 @@ Bağlamın ne olacağını sohbet arayüzündeki **"Bağlamı önizle"** düğme
 ## 4) Docker
 
 ```bash
-cp .env.example .env     # PROJECTS_DIR ve OLLAMA_URL'i düzenleyin
+# İsteğe bağlı: .env dosyasında PROJECTS_DIR (projelerin üst klasörü) ve OLLAMA_URL'i ayarlayın
 docker compose up -d --build
 # → http://localhost:8080   (yalnızca bu makineden erişilir)
 ```
@@ -107,9 +108,10 @@ Ayarlar: `devagents.serverUrl`, `devagents.contextMode` (`inline`: workspace dos
 | Uç nokta | Açıklama |
 |---|---|
 | `POST /api/chat` | Tek seferde JSON sonuç |
-| `POST /api/chat/stream` | NDJSON olay akışı: `stage_start`, `token`, `stage_end`, `final`, `error` |
+| `POST /api/chat/stream` | NDJSON olay akışı: `stage_start`, `token`, `stage_end`, `plan`, `final`, `error` |
 | `POST /api/context/preview` | Ajanlara gidecek bağlamı gösterir |
 | `GET /api/models`, `/api/config`, `/api/projects`, `/api/health` | Yardımcı uç noktalar |
+| `POST /v1/chat/completions` | OpenAI uyumlu uç nokta (model adı `csharp-multi-agent`); yalnızca son mesajı kullanır, proje bağlamı göndermez |
 
 ```bash
 curl -X POST http://localhost:8080/api/chat -H "Content-Type: application/json" -d '{
@@ -120,15 +122,13 @@ curl -X POST http://localhost:8080/api/chat -H "Content-Type: application/json" 
 ```
 Sonuçta `finalMarkdown` (Türkçe rapor), `files` (ayrıştırılmış kod/test dosyaları), `approved`, `analysis`, `review` alanları bulunur.
 
-## Bilmeniz gerekenler
+Hatalar `application/problem+json` olarak döner ve `detail` alanında Türkçe mesaj bulunur: hatalı istek (boş soru,
+izin verilmeyen proje yolu) **400**, Ollama'ya ulaşılamazsa veya model hata verirse **502**, zaman aşımında **504**.
+Akış uç noktalarında hata bir `error` olayı olarak bildirilir.
 
-* **Test Agent kodu çalıştırmaz**; test kodu yazar ve gerçek derleme yapmadan hata arar. Derleme/`dotnet test` doğrulaması için bir sonraki adım olarak ayrı bir "çalıştır-düzelt" döngüsü eklenebilir.
-* Kod dosyalarını yazma işlemi yalnızca VS Code eklentisinde, sizin onayınızla yapılır; API proje dosyalarını değiştirmez.
-* Küçük (7B) modellerde format bozulabilir; bu durumda `Coder`/`Analyzer` için daha büyük model seçin ya da `NumCtx` değerini artırın.
-* `Workspace:AllowedRoots` boşsa API makinedeki her klasörü okuyabilir. Yalnızca localhost'a açık tutun; Docker kurulumunda otomatik olarak `/workspace` ile sınırlıdır.
+**Continue** eklentisinden kullanmak için `config.yaml` örneği:
 
-
-
+```yaml
 name: Main Config
 version: 1.0.0
 schema: v1
@@ -144,3 +144,40 @@ models:
       - edit
       - apply
     default: true
+```
+
+## 7) Mimari (Clean Architecture)
+
+```
+src/
+  DevAgents.Domain           Ajan rolleri, ajan planı (AgentPlan) kuralları, üretilen dosya, güvenli göreli yol kuralı. Bağımlılığı yok.
+  DevAgents.Application      Kullanım senaryoları: ajan pipeline'ı (Chat), proje bağlamı seçimi (Context), sistem bilgisi (SystemInfo),
+                             ajan çıktısı ayrıştırıcıları ve Infrastructure'ın uyguladığı arayüzler (Common/Interfaces).
+  DevAgents.Infrastructure   Ollama HTTP istemcisi ve ajan başına model çözümleme, prompt dosyaları, dosya sistemi erişimi.
+  DevAgents.Api              Minimal API uç noktaları, yapılandırma, hata → HTTP eşlemesi; web arayüzü (wwwroot) ve prompts/.
+tests/
+  DevAgents.Domain.UnitTests · DevAgents.Application.UnitTests · DevAgents.Infrastructure.IntegrationTests
+```
+
+Bağımlılıklar içe doğrudur: `Api → Infrastructure → Application → Domain`. Application yalnızca arayüzleri
+(`ILanguageModelClient`, `IAgentModelResolver`, `IPromptProvider`, `IWorkspaceFileSystem`) tanır; Ollama'yı veya diski doğrudan görmez.
+
+| Değiştirmek istediğiniz | Yer |
+|---|---|
+| Bir ajanın talimatları / çıktı biçimi | `src/DevAgents.Api/prompts/*.md` (biçim değişirse `Application/Chat/Parsing` da) |
+| Hangi ajanın ne zaman çalıştığı | `Application/Chat/AgentPipeline.cs` |
+| Ajanlara giden mesajların bölümleri | `Application/Chat/AgentMessages.cs` |
+| Bağlama hangi dosyaların girdiği | `Application/Context/` |
+| Başka bir model sunucusu | `ILanguageModelClient`'ın yeni bir uygulaması + `Infrastructure/DependencyInjection.cs` |
+
+```bash
+dotnet build      # kök dizinde: DevAgents.slnx
+dotnet test
+```
+
+## Bilmeniz gerekenler
+
+* **Test Agent kodu çalıştırmaz**; test kodu yazar ve gerçek derleme yapmadan hata arar. Derleme/`dotnet test` doğrulaması için bir sonraki adım olarak ayrı bir "çalıştır-düzelt" döngüsü eklenebilir.
+* Kod dosyalarını yazma işlemi yalnızca VS Code eklentisinde, sizin onayınızla yapılır; API proje dosyalarını değiştirmez.
+* Küçük (7B) modellerde format bozulabilir; bu durumda `Coder`/`Analyzer` için daha büyük model seçin ya da `NumCtx` değerini artırın.
+* `Workspace:AllowedRoots` boşsa API makinedeki her klasörü okuyabilir. Yalnızca localhost'a açık tutun; Docker kurulumunda otomatik olarak `/workspace` ile sınırlıdır.
