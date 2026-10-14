@@ -49,13 +49,16 @@ internal sealed partial class ProtectedMarkdown
                 missing.Add(_codeBlocks[i]);
         }
 
+        // Çevirmenin uydurduğu ya da başka bölümden taşıdığı yer tutucular (karşılığı olan blok yok) metinde kalmasın.
+        translated = Placeholder().Replace(translated, "").TrimEnd();
+
         if (missing.Count > 0)
             translated += "\n\n" + string.Join("\n\n", missing);
         return translated;
     }
 
-    // İsteğe bağlı "### FILE: yol" başlığı ve ardından gelen ``` kod bloğu.
-    [GeneratedRegex(@"(^###[ \t]*FILE:[^\n]*\n\s*)?^```[^\n]*\n.*?^```[ \t]*$", RegexOptions.Multiline | RegexOptions.Singleline)]
+    // İsteğe bağlı "### FILE: yol" başlığı ve ardından gelen ``` kod bloğu (liste içindeyse girintili olabilir).
+    [GeneratedRegex(@"(^###[ \t]*FILE:[^\n]*\n\s*)?^[ \t]*```[^\n]*\n.*?^[ \t]*```[ \t]*$", RegexOptions.Multiline | RegexOptions.Singleline)]
     private static partial Regex CodeBlock();
 
     [GeneratedRegex(@"\[\[CODE_\d+\]\]")]

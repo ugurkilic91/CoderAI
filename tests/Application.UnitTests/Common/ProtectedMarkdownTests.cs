@@ -29,4 +29,23 @@ public class ProtectedMarkdownTests
     {
         ProtectedMarkdown.Protect(text).HasProse.ShouldBe(expected);
     }
+
+    [Test]
+    public void ShouldProtectIndentedCodeBlocksInsideLists()
+    {
+        var markdown = "1. Entity:\n   ```csharp\n   public class KKEGOR { }\n   ```\n2. Done.";
+
+        var protectedMarkdown = ProtectedMarkdown.Protect(markdown);
+
+        protectedMarkdown.Text.ShouldBe("1. Entity:\n[[CODE_1]]\n2. Done.");
+        protectedMarkdown.Restore("1. Varlık:\n[[CODE_1]]\n2. Bitti.")
+            .ShouldBe("1. Varlık:\n   ```csharp\n   public class KKEGOR { }\n   ```\n2. Bitti.");
+    }
+
+    [Test]
+    public void ShouldDropPlaceholdersTheTranslatorInvented()
+    {
+        ProtectedMarkdown.Protect("- No DI registration needed.").Restore("- DI kaydı gerekmez.\n[[CODE_1]] [[CODE_2]]")
+            .ShouldBe("- DI kaydı gerekmez.");
+    }
 }
