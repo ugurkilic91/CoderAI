@@ -32,6 +32,12 @@ public static class PipelineStages
     /// <summary>Docker sandbox'ta dotnet build.</summary>
     public const string Build = "build";
 
+    /// <summary>Eksik using satırlarının model kullanmadan (Roslyn ile) eklenmesi.</summary>
+    public const string Usings = "usings";
+
+    /// <summary>Kodlama ajanının yanlışlıkla sildiği üyelerin dosyanın eski hâlinden geri eklenmesi (model kullanmadan).</summary>
+    public const string Restore = "restore";
+
     /// <summary>Derleme/test hatalarının düzeltme ajanına verilip düzeltilmesi.</summary>
     public const string Fix = "fix";
 

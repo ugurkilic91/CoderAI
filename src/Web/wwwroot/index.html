@@ -15,7 +15,7 @@
       </header>
 
       <section>
-        <label for="projectPath">Proje klasörü</label>
+        <label for="projectPath" id="projectLabel">Proje klasörü</label>
         <input id="projectPath" list="projectList" placeholder="C:\src\MyApp  veya  /workspace/MyApp" autocomplete="off">
         <datalist id="projectList"></datalist>
         <button class="ghost" id="previewBtn" type="button">Bağlamı önizle</button>
@@ -24,20 +24,24 @@
       <section class="dev">
         <label for="architecture">Mimari</label>
         <select id="architecture"><option value="">(seçilmedi: projedeki düzeni izle)</option></select>
-        <div class="row check">
-          <input id="apply" type="checkbox">
-          <label for="apply">Kodu projeye uygula, derle ve test et</label>
-        </div>
+
+        <fieldset class="modes">
+          <legend>Ne yapılsın?</legend>
+          <label class="mode"><input type="radio" name="devMode" value="suggest" checked>
+            <span><b>Sadece öner</b><small>Kodu sohbette gösterir, dosyalara dokunmaz.</small></span></label>
+          <label class="mode"><input type="radio" name="devMode" value="apply">
+            <span><b>Mevcut projeye uygula</b><small>Kodu proje klasörüne yazar, Docker'da derler ve testleri çalıştırır.</small></span></label>
+          <label class="mode"><input type="radio" name="devMode" value="new">
+            <span><b>Yeni proje oluştur</b><small>Mimarinin şablonundan yeni proje açar; sonra kodu yazar, derler ve test eder.</small></span></label>
+        </fieldset>
+
         <div id="applyOptions" hidden>
-          <div class="row check">
-            <input id="newProject" type="checkbox">
-            <label for="newProject">Mimarinin şablonundan yeni proje oluştur</label>
-          </div>
           <input id="newProjectName" placeholder="Yeni proje adı, örn: HobbyTracker" autocomplete="off" hidden>
           <div class="row check">
             <input id="askQuestions" type="checkbox" checked>
             <label for="askQuestions">Belirsizse önce bana soru sor</label>
           </div>
+          <p class="hint" id="modeHint"></p>
           <p class="hint" id="sandboxStatus"></p>
         </div>
       </section>
@@ -86,7 +90,8 @@
         <div class="empty" id="empty">
           <h2>Ne geliştirelim?</h2>
           <p>Soruyu Türkçe yazın. Sırayla çeviri, analiz, kodlama, test ve review ajanlarından geçip Türkçe sonuç döner.
-             Soldan bir mimari seçip <b>Kodu projeye uygula</b> derseniz kod projeye yazılır, Docker'da derlenir ve testleri çalıştırılır.</p>
+             Soldan mimariyi ve ne yapılacağını seçin: <b>Mevcut projeye uygula</b> ya da <b>Yeni proje oluştur</b> derseniz
+             kod projeye yazılır, Docker'da derlenir ve testleri çalıştırılır.</p>
           <ul>
             <li><button type="button" class="sample">Sipariş iptal etme endpoint'i ekle; iptal edilen siparişin stoğu geri yüklensin.</button></li>
             <li><button type="button" class="sample">UserService için FluentValidation kuralları yaz ve birim testlerini ekle.</button></li>

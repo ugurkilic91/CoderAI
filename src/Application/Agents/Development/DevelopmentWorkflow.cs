@@ -27,13 +27,15 @@ internal sealed record DevelopmentOutcome(DevelopmentSummary Summary, IReadOnlyL
 /// <summary>
 /// Kodu projeye uygulayan akış (ApplyChanges):
 /// kodlama ajanı yazar → Roslyn sözdizimi kontrolü → projenin anlık görüntüsü (yedek) → dosyalar projeye yazılır →
-/// Docker'da derlenir (hata varsa düzeltme ajanı düzeltir) → test ajanı testleri yazar → testler derlenip çalıştırılır
-/// (başarısızsa düzeltilir) → isteğe bağlı review. Her adım istemciye canlı olay olarak bildirilir.
+/// Docker'da derlenir (eksik using'ler otomatik eklenir, kalan hataları düzeltme ajanı düzeltir) → test ajanı testleri yazar →
+/// testler derlenip çalıştırılır (başarısızsa düzeltilir) → isteğe bağlı review. Her adım istemciye canlı olay olarak bildirilir.
 /// </summary>
 internal sealed partial class DevelopmentWorkflow(
     IProjectWriter writer,
     IChangeTracker changeTracker,
     ICodeSyntaxChecker syntaxChecker,
+    IUsingDirectiveFixer usingFixer,
+    ICodeMemberRestorer memberRestorer,
     IBuildSandbox sandbox,
     IWorkspaceFileSystem workspace,
     ProjectLocks locks,
@@ -41,6 +43,9 @@ internal sealed partial class DevelopmentWorkflow(
     ILogger<DevelopmentWorkflow> logger)
 {
     private const int MaxSyntaxFixAttempts = 2;
+
+    // Model kullanmayan düzeltme turları (using, silinen üye) düzeltme ajanı hakkından düşmez; yine de sınırlı.
+    private const int MaxAutoFixRounds = 4;
 
     /// <summary>
     /// Seçilen mimarinin şablonundan yeni proje oluşturur ("scaffold" aşaması) ve proje kökünü döndürür.
@@ -69,8 +74,19 @@ internal sealed partial class DevelopmentWorkflow(
         run.Work.Code = await run.Agents.RunStageAsync(PipelineStages.Code, AgentRole.Coder, AgentPrompts.Coder, run.Messages.ForCoding(run.Work));
         var notes = MarkdownSections.Read(run.Work.Code, "NOTES");
         var codeFiles = GeneratedFileParser.Parse(run.Work.Code, GeneratedFileKind.Code).ToList();
+
         if (codeFiles.Count == 0)
             return state.Stop("Kodlama ajanı ayrıştırılabilir bir dosya üretmedi (\"### FILE:\" biçimi); projeye bir şey yazılmadı.", notes);
+
+        // Testleri test ajanı yazar (mimarinin test örneğiyle, kod derlendikten sonra). Kodlama ajanı yine de test dosyası
+        // yazdıysa onları projeye almıyoruz: derlenmeyen bir test, derlenebilen kodu da derlenmez gösterir.
+        // (Yalnızca test yazdıysa istenen buydur; o zaman dokunmuyoruz.)
+        var skippedTests = run.Plan.Test ? codeFiles.Count(file => IsTestFile(file.Path)) : 0;
+        if (skippedTests > 0 && skippedTests < codeFiles.Count)
+        {
+            codeFiles.RemoveAll(file => IsTestFile(file.Path));
+            notes = $"{notes}\n- DevAgents: the {skippedTests} test file(s) written by the coding agent were skipped; tests are written by the test agent after the code compiles.".Trim();
+        }
 
         // 2) Yazmadan önce projenin anlık görüntüsünü alıyoruz: tüm değişiklikler tek adımda geri alınabilsin.
         state.Snapshot = await changeTracker.SnapshotAsync(run.ProjectRoot, "DevAgents: değişikliklerden önce", run.CancellationToken);
@@ -98,25 +114,101 @@ internal sealed partial class DevelopmentWorkflow(
     /// <summary>Dosyaları Roslyn'den geçirir, projeye yazar ve derler; derlenmezse düzeltme turları yapar.</summary>
     private async Task<BuildResult> WriteAndBuildAsync(DevelopmentState state, IReadOnlyList<GeneratedFile> files)
     {
-        var settings = options.CurrentValue;
         files = await FixSyntaxAsync(state, files);
         await WriteAsync(state, files);
+        return await BuildAndFixAsync(state);
+    }
 
-        for (var fix = 0; ; fix++)
+    /// <summary>
+    /// Derler; hata varsa önce eksik using'leri model kullanmadan ekler, kalan hataları düzeltme ajanına verir ve yeniden derler.
+    /// </summary>
+    private async Task<BuildResult> BuildAndFixAsync(DevelopmentState state)
+    {
+        var settings = options.CurrentValue;
+        var autoRounds = 0;
+        var fixes = 0;
+        while (true)
         {
             var build = await BuildAsync(state);
-            if (build.Succeeded || fix >= settings.MaxBuildFixAttempts)
+            if (build.Succeeded)
                 return build;
 
-            // Derleme hatalarını ve ilgili dosyaların diskteki güncel hâlini düzeltme ajanına veriyoruz.
-            var errors = build.Errors.Take(settings.MaxErrorsPerFix).ToList();
-            var fixes = await FixAsync(state, state.Run.Messages.ForBuildFix(errors, FilesFor(state, errors.Select(e => e.File)), state.Written.Keys));
-            if (fixes.Count == 0)
-                return build; // ajan bir düzeltme önermedi: aynı derlemeyi tekrarlamanın anlamı yok
+            // a) Model gerektirmeyen düzeltmeler (saniyeler sürer): eksik using'ler (tipin namespace'i projeden ve paketlerden
+            //    bulunur) ve kodlama ajanının değiştirdiği dosyalardan yanlışlıkla sildiği üyeler (dosyanın eski hâlinden).
+            if (autoRounds < MaxAutoFixRounds
+                && (await AddMissingUsingsAsync(state, build.Errors) | await RestoreLostMembersAsync(state, build.Errors)))
+            {
+                autoRounds++;
+                continue;
+            }
 
-            fixes = await FixSyntaxAsync(state, fixes);
-            await WriteAsync(state, fixes);
+            if (fixes++ >= settings.MaxBuildFixAttempts)
+                return build;
+
+            // b) Kalan hataları ve ilgili dosyaların diskteki güncel hâlini düzeltme ajanına veriyoruz.
+            var errors = build.Errors.Take(settings.MaxErrorsPerFix).ToList();
+            var changed = await FixAndWriteAsync(state,
+                state.Run.Messages.ForBuildFix(errors, FilesFor(state, errors.Select(e => e.File)), state.Written.Keys));
+            if (changed == 0)
+                return build; // ajan hiçbir dosyayı değiştirmedi: aynı derlemeyi tekrarlamanın anlamı yok
         }
+    }
+
+    /// <summary>
+    /// Derleme hatalarındaki eksik using'leri ekler (IDE'deki "using ekle" gibi) ve dosyaları projeye yazar.
+    /// Bir dosya değiştiyse true döner; o zaman yeniden derliyoruz.
+    /// </summary>
+    private async Task<bool> AddMissingUsingsAsync(DevelopmentState state, IReadOnlyList<CompilerDiagnostic> errors)
+    {
+        var agents = state.Run.Agents;
+        var stopwatch = Stopwatch.StartNew();
+        var fixes = await usingFixer.FixAsync(state.Run.ProjectRoot, errors, state.Run.CancellationToken);
+        if (fixes.Count == 0)
+            return false;
+
+        await agents.PublishAsync(PipelineEvent.StageStarted(PipelineStages.Usings, $"{fixes.Count} dosya"));
+        foreach (var fix in fixes)
+            await agents.PublishAsync(PipelineEvent.Token(PipelineStages.Usings,
+                $"{fix.Path}: {string.Join(" ", fix.AddedNamespaces.Select(ns => $"using {ns};"))}\n"));
+        await agents.PublishAsync(PipelineEvent.StageEnded(PipelineStages.Usings, stopwatch.Elapsed.TotalSeconds,
+            $"{fixes.Sum(fix => fix.AddedNamespaces.Count)} using eklendi", fixes.Select(fix => new { fix.Path, fix.AddedNamespaces }).ToList()));
+
+        state.UsingsAdded += fixes.Sum(fix => fix.AddedNamespaces.Count);
+        var changes = await WriteAsync(state, [.. fixes.Select(fix => new GeneratedFile(fix.Path, fix.Content, state.KindOf(fix.Path)))]);
+        return changes.Count > 0;
+    }
+
+    /// <summary>
+    /// Kodlama ajanının değiştirdiği mevcut dosyalardan yanlışlıkla sildiği üyeleri (örn. IApplicationDbContext'teki diğer
+    /// DbSet'ler) dosyanın bu görevden önceki hâlinden geri ekler. Yalnızca derleme hatasının aradığı üyelere dokunulur.
+    /// </summary>
+    private async Task<bool> RestoreLostMembersAsync(DevelopmentState state, IReadOnlyList<CompilerDiagnostic> errors)
+    {
+        var missing = MissingMembers.From(errors, state.Written.ContainsKey);
+        if (missing.Count == 0 || state.Originals.Count == 0)
+            return false;
+
+        var stopwatch = Stopwatch.StartNew();
+        var restores = new List<(string Path, MemberRestore Result)>();
+        foreach (var (path, original) in state.Originals)
+        {
+            if (workspace.ReadFile(state.Run.ProjectRoot, path) is { } current && memberRestorer.Restore(original, current, missing) is { } result)
+                restores.Add((path, result));
+        }
+        if (restores.Count == 0)
+            return false;
+
+        var agents = state.Run.Agents;
+        var count = restores.Sum(restore => restore.Result.RestoredMembers.Count);
+        await agents.PublishAsync(PipelineEvent.StageStarted(PipelineStages.Restore, $"{restores.Count} dosya"));
+        foreach (var (path, result) in restores)
+            await agents.PublishAsync(PipelineEvent.Token(PipelineStages.Restore, $"{path}: {string.Join(", ", result.RestoredMembers)}\n"));
+        await agents.PublishAsync(PipelineEvent.StageEnded(PipelineStages.Restore, stopwatch.Elapsed.TotalSeconds, $"{count} üye geri eklendi",
+            restores.Select(restore => new { restore.Path, restore.Result.RestoredMembers }).ToList()));
+
+        state.MembersRestored += count;
+        var changes = await WriteAsync(state, [.. restores.Select(restore => new GeneratedFile(restore.Path, restore.Result.Content, state.KindOf(restore.Path)))]);
+        return changes.Count > 0;
     }
 
     /// <summary>
@@ -145,17 +237,25 @@ internal sealed partial class DevelopmentWorkflow(
     }
 
     /// <summary>Dosyaları projeye yazar ve hangilerinin yeni, hangilerinin değişmiş olduğunu bildirir.</summary>
-    private async Task WriteAsync(DevelopmentState state, IReadOnlyList<GeneratedFile> files)
+    private async Task<IReadOnlyList<FileChange>> WriteAsync(DevelopmentState state, IReadOnlyList<GeneratedFile> files)
     {
         var agents = state.Run.Agents;
         await agents.PublishAsync(PipelineEvent.StageStarted(PipelineStages.Write, $"{files.Count} dosya"));
         var stopwatch = Stopwatch.StartNew();
+        // Var olan bir dosyaya bu görevde ilk kez yazılıyorsa eski hâlini saklıyoruz (silinen üyeleri geri ekleyebilmek için).
+        foreach (var file in files)
+        {
+            if (!state.Written.ContainsKey(file.Path) && !state.Originals.ContainsKey(file.Path)
+                && workspace.ReadFile(state.Run.ProjectRoot, file.Path) is { } original)
+                state.Originals[file.Path] = original;
+        }
         var changes = await writer.WriteAsync(state.Run.ProjectRoot, files, state.Run.CancellationToken);
         foreach (var file in files)
             state.Written[file.Path] = file;
         foreach (var change in changes)
             await agents.PublishAsync(PipelineEvent.Token(PipelineStages.Write, $"{(change.Kind == FileChangeKind.Created ? "+" : "~")} {change.Path}\n"));
         await agents.PublishAsync(PipelineEvent.StageEnded(PipelineStages.Write, stopwatch.Elapsed.TotalSeconds, DescribeChanges(changes), changes));
+        return changes;
     }
 
     /// <summary>Docker sandbox'ta derleme: paketler ağ açıkken geri yüklenir, derleme ağ kapalı yapılır.</summary>
@@ -193,10 +293,16 @@ internal sealed partial class DevelopmentWorkflow(
             return;
         }
 
+        // Kod derlenmiş hâldeyken ikinci bir anlık görüntü: testler derlenemezse yalnızca test adımını geri alıp
+        // projeyi derlenebilir bırakacağız (derlenen kod kalır).
+        var beforeTests = await changeTracker.SnapshotAsync(run.ProjectRoot, "DevAgents: testlerden önce", run.CancellationToken);
+        var writtenBeforeTests = new Dictionary<string, GeneratedFile>(state.Written, StringComparer.Ordinal);
+
         var build = await WriteAndBuildAsync(state, testFiles);
         if (!build.Succeeded)
         {
-            state.Problem = "Testler, düzeltme turlarına rağmen derlenemedi; testler çalıştırılmadı.";
+            await RollBackTestStepAsync(state, beforeTests, writtenBeforeTests,
+                "Test ajanının yazdığı testler düzeltme turlarına rağmen derlenemedi; projenin derlenebilir kalması için test adımı geri alındı.");
             return;
         }
 
@@ -211,16 +317,42 @@ internal sealed partial class DevelopmentWorkflow(
             }
 
             // Başarısız testleri ve ilgili dosyaları düzeltme ajanına veriyoruz; kod mu test mi hatalı, o karar veriyor.
-            var fixes = await FixAsync(state, run.Messages.ForTestFix(tests, FilesFor(state, [])));
-            if (fixes.Count == 0)
-                return;
-            var rebuilt = await WriteAndBuildAsync(state, fixes);
+            if (await FixAndWriteAsync(state, run.Messages.ForTestFix(tests, FilesFor(state, []))) == 0)
+                return; // ajan hiçbir dosyayı değiştirmedi: aynı testleri yeniden çalıştırmanın anlamı yok
+            var rebuilt = await BuildAndFixAsync(state);
             if (!rebuilt.Succeeded)
             {
-                state.Problem = "Test düzeltmesinden sonra proje derlenemedi.";
+                await RollBackTestStepAsync(state, beforeTests, writtenBeforeTests,
+                    "Test düzeltmesinden sonra proje derlenemedi; projenin derlenebilir kalması için test adımı geri alındı.");
                 return;
             }
         }
+    }
+
+    /// <summary>
+    /// Test adımını (test dosyaları ve bu adımdaki düzeltmeler) geri alır ve projeyi yeniden derleyerek
+    /// kodun derlenebilir kaldığını doğrular. Testlerin içeriği arayüzde "Test Agent" adımında görünmeye devam eder.
+    /// </summary>
+    private async Task RollBackTestStepAsync(
+        DevelopmentState state, string snapshot, Dictionary<string, GeneratedFile> writtenBefore, string problem)
+    {
+        var agents = state.Run.Agents;
+        await agents.PublishAsync(PipelineEvent.StageStarted(PipelineStages.Write, "test adımı geri alınıyor"));
+        var stopwatch = Stopwatch.StartNew();
+        var reverted = await changeTracker.RevertAsync(state.Run.ProjectRoot, snapshot, state.Run.CancellationToken);
+        foreach (var change in reverted)
+            await agents.PublishAsync(PipelineEvent.Token(PipelineStages.Write, $"↩ {change.Path}\n"));
+        await agents.PublishAsync(PipelineEvent.StageEnded(PipelineStages.Write, stopwatch.Elapsed.TotalSeconds,
+            $"{reverted.Count} dosya geri alındı", reverted));
+
+        // Sonuçta artık projede olmayan dosyalar ve testler görünmesin: durum da test adımından önceki hâline döner.
+        state.Tests = null;
+        state.Written.Clear();
+        foreach (var (path, file) in writtenBefore)
+            state.Written[path] = file;
+
+        var build = await BuildAsync(state);
+        state.Problem = build.Succeeded ? problem : problem + " Geri almadan sonra da derleme başarısız.";
     }
 
     /// <summary>Docker sandbox'ta testleri çalıştırır (ağ kapalı).</summary>
@@ -246,8 +378,28 @@ internal sealed partial class DevelopmentWorkflow(
         var run = state.Run;
         run.Work.Code = Render(state.FilesOfKind(GeneratedFileKind.Code));
         run.Work.Tests = Render(state.FilesOfKind(GeneratedFileKind.Test));
-        run.Work.Review = await run.Agents.RunStageAsync(PipelineStages.Review, AgentRole.Reviewer, AgentPrompts.Reviewer, run.Messages.ForReview(run.Work));
+        // Review ajanına gerçek sonuçları veriyoruz: kod derlendi, testlerin durumu belli.
+        var tests = state.Tests is { } result
+            ? $"dotnet test: {result.Passed}/{result.Total} passed" +
+              (result.Failed > 0 ? $"; failing: {string.Join(", ", result.Failures.Take(5).Select(failure => failure.Name))}" : "")
+            : "dotnet test: not run";
+        var verification = $"dotnet build: succeeded.\n{tests}";
+        run.Work.Review = await run.Agents.RunStageAsync(PipelineStages.Review, AgentRole.Reviewer, AgentPrompts.Reviewer,
+            run.Messages.ForReview(run.Work, verification));
         run.Work.Approved = ReviewVerdictParser.IsApproved(run.Work.Review);
+    }
+
+    /// <summary>
+    /// Düzeltme ajanını çalıştırır, önerdiği dosyaları Roslyn'den geçirip projeye yazar; projede değişen dosya sayısını döndürür.
+    /// </summary>
+    private async Task<int> FixAndWriteAsync(DevelopmentState state, string message)
+    {
+        state.FixRounds++;
+        var fixes = await FixAsync(state, message);
+        if (fixes.Count == 0)
+            return 0;
+        fixes = await FixSyntaxAsync(state, fixes);
+        return (await WriteAsync(state, fixes)).Count;
     }
 
     /// <summary>
@@ -277,6 +429,14 @@ internal sealed partial class DevelopmentWorkflow(
                 files.Add(new GeneratedFile(path, content, state.KindOf(path)));
         }
         return files;
+    }
+
+    // Test projesindeki dosyalar: "tests/..." altında ya da adı Tests ile biten bir klasörde (örn. Shop.UnitTests).
+    private static bool IsTestFile(string path)
+    {
+        var folders = path.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries)[..^1];
+        return folders.Length > 0 && (folders[0] is "tests" or "test" or "Tests" or "Test"
+            || folders.Any(folder => folder.EndsWith("Tests", StringComparison.Ordinal)));
     }
 
     private static string Render(IEnumerable<GeneratedFile> files) =>
@@ -310,6 +470,15 @@ internal sealed partial class DevelopmentWorkflow(
 
         public string? Problem { get; set; }
 
+        public int UsingsAdded { get; set; }
+
+        public int MembersRestored { get; set; }
+
+        /// <summary>Bu görevde değiştirilen ve önceden var olan dosyaların görevden önceki hâlleri.</summary>
+        public Dictionary<string, string> Originals { get; } = new(StringComparer.Ordinal);
+
+        public int FixRounds { get; set; }
+
         /// <summary>Bu görevde projeye yazılan dosyaların son hâlleri (yola göre).</summary>
         public Dictionary<string, GeneratedFile> Written { get; } = new(StringComparer.Ordinal);
 
@@ -329,7 +498,7 @@ internal sealed partial class DevelopmentWorkflow(
 
         public DevelopmentOutcome Complete(IReadOnlyList<FileChange> changes, string notes) => new(
             new DevelopmentSummary(Run.ProjectRoot, Run.Architecture?.Name, Run.ProjectCreated, Snapshot, changes,
-                Build, BuildAttempts, Tests, TestAttempts, Problem),
+                Build, BuildAttempts, Tests, TestAttempts, Problem, UsingsAdded, FixRounds, MembersRestored),
             [.. Written.Values],
             notes);
     }

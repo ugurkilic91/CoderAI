@@ -1,183 +1,189 @@
-# DevAgents — yerel Ollama ile çok ajanlı kod geliştirme
+# DevAgents — yerel modellerle, seçilen mimaride kod geliştiren ajanlar
+
+DevAgents şirket içinde (on-prem) çalışan bir kod geliştirme aracıdır. İsteğinizi Türkçe yazarsınız.
+Ajanlar isteği analiz eder, kodu **seçtiğiniz mimariye göre** yazar ve dosyaları projeye ekler.
+Ardından kodu **Docker'da derler**, birim testlerini yazıp çalıştırır ve sonucu Türkçe raporlar.
+Tüm modeller yerel Ollama sunucusunda çalışır; kod dışarı çıkmaz.
 
 ```
-Türkçe soru → İngilizce → Router → [Cevap | Analiz → Kodlama → Test → Review] → Türkçe sonuç
-                                                                  ↑__ (review "değişiklik gerekli" derse) __|
+Türkçe istek → (gerekirse) İngilizceye çeviri → Router → Analiz → Kodlama → dosyalar projeye yazılır
+  → derleme (Docker) ⟲ eksik using'ler otomatik eklenir, kalan hatalar Düzeltme ajanında
+  → Test ajanı testleri yazar → testler çalışır (Docker) ⟲ başarısızsa düzeltme → Review → Türkçe rapor
 ```
 
-**Router Agent** isteği okuyup hangi ajanların gerekli olduğuna kendisi karar verir:
+## 1) Gereksinimler
 
-| İstek | Çalışan ajanlar |
-|---|---|
-| Soru / açıklama / genel sohbet | yalnızca Cevap |
-| Küçük değişiklik | yalnızca Kodlama |
-| Hata düzeltme | Kodlama (+ Test) |
-| Yeni özellik / çok dosyalı iş | Analiz → Kodlama → Test → Review |
-| "Şunun testlerini yaz" / "şunu review et" | yalnızca Test / yalnızca Review |
+* **.NET 10 SDK**
+* **Ollama** ve modeller. Varsayılan ayarlar şu modelleri kullanır:
+  ```bash
+  ollama pull qwen2.5-coder:14b   # analiz, kodlama, test, review, düzeltme
+  ollama pull qwen3.5:9b          # çeviri ve router
+  ```
+* **Docker**: derleme ve testler ayrı konteynerlerde çalışır. Docker yoksa `Sandbox:Mode=Process` ayarıyla doğrudan makinede de çalışabilir; bu mod yalnızca kişisel kullanım içindir.
 
-Router'ın kararı okunamazsa güvenli tarafta kalıp tam pipeline çalışır. Zorlamak için: arayüzde **Çalışma modu → Tam pipeline**,
-API'de `"options": { "mode": "full" }` veya `"options": { "stages": ["code","test"] }`. Karar kuralları `prompts/router.md` içindedir.
-
-* **C# / .NET 10** API (**Clean Architecture**, bkz. [Mimari](#7-mimari-clean-architecture)) + hazır **web sohbet arayüzü** (ChatGPT benzeri, canlı pipeline adımları)
-* **Yerel Ollama**: her ajan için model/sıcaklık/context boyutu **config** dosyasından seçilir
-* **Proje bağlamı**: klasör yolu verirsiniz; mimari özeti (csproj, paketler, katmanlar, dosya ağacı) ve isteğe en uygun dosyalar ajanlara gider
-* **VS Code eklentisi** (API'yi kullanır) ve **docker compose**
-
-## 1) Hızlı başlangıç (Docker'sız)
+## 2) Çalıştırma
 
 ```bash
-ollama pull qwen2.5-coder:7b
-ollama pull qwen2.5:7b            # çeviri ajanları için
-
-cd src/DevAgents.Api
+cd src/Web
 dotnet run
 # → http://localhost:8080
 ```
 
-## 2) Model seçimi (config)
+VS Code'da **F5** de çalışır (`.vscode/launch.json`). Arayüz güncellendikten sonra eski bir görünüm kalırsa sayfayı **Ctrl+Shift+R** ile yenileyin.
 
-Varsayılanlar `src/DevAgents.Api/appsettings.json` içindedir. **Kendi ayarlarınızı `config/local.json` dosyasına yazın**
-(değişiklikler yeniden başlatmadan uygulanır; dosya yoksa varsayılanlar kullanılır):
+## 3) Nasıl kullanılır?
+
+Sol panelde üç ayar vardır: **Mimari**, **Ne yapılsın?** ve **Proje klasörü**.
+
+| Ne yapılsın? | Ne olur |
+|---|---|
+| **Sadece öner** | Kod sohbette gösterilir, dosyalara dokunulmaz. Soru sormak ve fikir almak için. |
+| **Mevcut projeye uygula** | Kod, "Proje klasörü"ndeki projeye yazılır, derlenir ve testleri çalıştırılır. Önce yedek alınır. |
+| **Yeni proje oluştur** | Seçili mimarinin şablonundan yeni bir proje açılır, sonra kod yazılır, derlenir ve test edilir. |
+
+**Örnek: sıfırdan bir proje**
+1. **Mimari:** *Clean Architecture (CQRS + MediatR)*
+2. **Ne yapılsın?** *Yeni proje oluştur*, proje adı: `HobbyTracker`
+3. **Yeni projenin açılacağı klasör:** örn. `/home/ben/projeler`. Proje bu klasörün içinde açılır.
+4. İstek: *"Hobilerimi kaydeden bir özellik geliştir: hobi ekleme, listeleme, güncelleme ve silme."*
+
+Ekranda adımları canlı izlersiniz: proje oluşturma, analiz, kodlama, Roslyn sözdizimi kontrolü, dosyaların yazılması,
+derleme, eksik using'ler, düzeltme, test ajanı ve testlerin çalışması. Sonuç kartında derleme ve test rozetleri,
+değişen dosyalar ve **"Değişiklikleri geri al"** düğmesi bulunur. Proje oluşturulduktan sonra mod kendiliğinden
+*Mevcut projeye uygula*'ya geçer; sonraki istekler ("hobiye kategori ekle") aynı projeye devam eder.
+
+**Belirsizse önce bana soru sor** açıksa analiz ajanı eksik bilgiyi sorar. Cevabınızı yeni mesaj olarak yazın;
+önceki konuşma ajanlara aktarılır.
+
+Süreler hakkında: 12 GB ekran kartlı bir dizüstünde (`qwen2.5-coder:14b`) "yeni proje + hobi ekleme/listeleme/güncelleme/silme"
+isteği yaklaşık **9 dakika** sürdü: analiz 1,5 dk, kodlama 3 dk, derleme ve testler saniyeler, review ve çeviri 1 dk.
+Kalan süre, test düzeltme turlarına gitti. İlk derlemede NuGet paketleri indirilir (~1 GB).
+Paketler `~/.devagents/sandbox-home` altında saklanır; sonraki derlemeler saniyeler sürer.
+
+### Güvenlik ve geri alma
+* Dosyalar yazılmadan önce projenin anlık görüntüsü alınır. Görüntü projenin kendi `.git`'ine değil,
+  `~/.devagents/history` altındaki ayrı bir depoya yazılır. "Değişiklikleri geri al" o ana döner.
+* Derleme ve testler, kaynakları sınırlı (4 GB bellek, 2 CPU) konteynerlerde çalışır. Paket geri yüklemesi dışında
+  **ağ kapalıdır**; yapay zekânın yazdığı kod dışarıyla konuşamaz.
+* Ajanlar `.git`, `bin`, `obj` klasörlerine ve proje dışına yazamaz. Aynı projede aynı anda tek bir iş çalışır.
+
+## 4) Mimariler (şirket şablonunuzu eklemek)
+
+Her mimari `src/Web/architectures/<id>/` klasöründedir:
+
+```
+profile.json   ad, açıklama, şablon klasörü, "dotnet new" argümanları, test projeleri, örnek dosyalar
+rules.md       ajanların uyacağı kurallar (İngilizce: modeller İngilizcede daha iyi uyuyor)
+examples/      şablonda karşılığı olmayan örnekler (örn. handler testi)
+```
+
+Ajanlar eğitilmez. Her istekte kurallar, mimarinin gerçek örnek dosyaları ve derleme/test geri bildirimi verilir.
+Şirketinizin şablonu için yeni bir klasör eklemeniz yeterlidir; kod değişikliği gerekmez.
+Hazır gelen *clean-architecture* profili, Jason Taylor'ın Clean Architecture şablonunu (`projects/CleanArchitecture`, `ca-sln`) kullanır.
+
+> Not: Bu şablonla oluşturulan projeler MediatR 14 ve AutoMapper 16 kullanır. Bu sürümler ticari kullanımda lisans gerektirir.
+> Şirket şablonunuzda farklı sürümler varsa profili kendi şablonunuza yönlendirin.
+
+## 5) Modeller ve ayarlar
+
+Varsayılanlar `src/Web/appsettings.json` içindedir. **Kendi ayarlarınızı `config/local.json` dosyasına yazın.**
+Değişiklikler yeniden başlatmadan uygulanır.
 
 ```json
 {
   "Ollama": {
     "BaseUrl": "http://localhost:11434",
+    "Defaults": { "Model": "qwen2.5-coder:14b", "NumCtx": 16384 },
     "Agents": {
-      "Translator":     { "Model": "qwen2.5:7b" },
-      "Analyzer":       { "Model": "qwen2.5-coder:14b", "NumCtx": 24576 },
-      "Coder":          { "Model": "qwen2.5-coder:14b", "Temperature": 0.1 },
-      "Tester":         { "Model": "qwen2.5-coder:7b" },
-      "Reviewer":       { "Model": "deepseek-r1:14b" },
-      "BackTranslator": { "Model": "qwen2.5:7b" }
+      "Router":     { "Model": "qwen3.5:9b" },
+      "Translator": { "Model": "qwen3.5:9b" },
+      "Coder":      { "Model": "qwen2.5-coder:14b", "Temperature": 0.15 }
     }
   },
-  "Pipeline":  { "MaxReviewIterations": 1 },
-  "Workspace": { "MaxContextChars": 24000 }
+  "Development": { "MaxBuildFixAttempts": 3, "MaxTestFixAttempts": 2 },
+  "Sandbox": { "Mode": "Docker", "Memory": "4g", "Cpus": "2" }
 }
 ```
 
-* Çözümleme sırası: web arayüzündeki o sohbete özel seçim → `Agents.<Ajan>` → `Defaults`
-* `BackTranslator` tanımlı değilse `Translator` ayarı kullanılır
-* Ortam değişkeniyle de verilebilir: `Ollama__Agents__Coder__Model=qwen2.5-coder:14b`
-* Ajanların sistem prompt'ları `src/DevAgents.Api/prompts/*.md` dosyalarındadır ve her istekte yeniden okunur:
-  Docker'da klasör bağlı olduğu için değişiklik **anında** geçerlidir; `dotnet run` ile çalışırken bir sonraki derlemede çıktı klasörüne kopyalanır
+* Model seçim sırası: arayüzde o sohbete özel seçim → `Agents.<Ajan>` → `Defaults`. Router ve BackTranslator tanımlı değilse Translator ayarı kullanılır.
+* Ortam değişkeniyle de verilebilir: `Ollama__Agents__Coder__Model=qwen2.5-coder:32b`.
+* Düşünen modeller (qwen3.5, deepseek-r1) varsayılan olarak **düşünmeden** çalışır (`"Think": false`); bir cümlelik çeviri
+  düşünmeyle 38 sn, düşünmeden 1 sn sürdü. Bir ajan için açmak isterseniz: `"Reviewer": { "Model": "deepseek-r1:14b", "Think": true }`.
+* İngilizce yazılan istekler çevrilmez (`Pipeline:DetectInputLanguage`).
+* Ajan prompt'ları `src/Web/prompts/*.md` dosyalarındadır. `dotnet run` ile çalışırken değişiklikler bir sonraki derlemede geçerli olur.
 
-## 3) Proje bağlamı nasıl çalışır?
-
-1. **Genel bakış**: `.csproj` içinden framework + paketler + proje referansları, klasör adlarından katman ipuçları (Controllers, Services, Domain, Handlers…), dosya ağacı
-2. **Sabit dosyalar**: csproj, `Program.cs`/`Startup.cs`, README
-3. **İlgili dosyalar**: isteğin (İngilizce çeviri dahil) anahtar kelimeleriyle dosya yolu ve içerik eşleşmesine göre puanlanır
-4. **Örnek dosyalar**: henüz temsil edilmeyen klasörlerden birer küçük `.cs` dosyası — kod stilini/konvansiyonu öğretmek için
-5. Web arayüzünden eklediğiniz dosyalar ve VS Code'da açık dosya/seçili kod **her zaman** bağlama girer
-
-`bin/obj/node_modules/.git` gibi klasörler, `.env`, `*secret*`, `*.pfx/.pem/.key` dosyaları atlanır.
-Bütçe `Workspace:MaxContextChars` ile ayarlanır (7B modeller için 16–24K karakter + `NumCtx: 16384` iyi bir başlangıçtır).
-Bağlamın ne olacağını sohbet arayüzündeki **"Bağlamı önizle"** düğmesiyle görebilirsiniz.
-
-## 4) Docker
+## 6) Ekip sunucusu (docker compose)
 
 ```bash
-# İsteğe bağlı: .env dosyasında PROJECTS_DIR (projelerin üst klasörü) ve OLLAMA_URL'i ayarlayın
+cp .env.example .env     # PROJECTS_DIR, DATA_DIR, DEVAGENTS_DIR, kullanıcı ve docker grubu numaraları
 docker compose up -d --build
-# → http://localhost:8080   (yalnızca bu makineden erişilir)
 ```
 
-* Projeleriniz konteynerde `/workspace` altına **salt-okunur** bağlanır. Arayüzde yol olarak sadece klasör adını (`MyApp`) yazabilirsiniz.
-* Ollama ana makinedeyse varsayılan `host.docker.internal:11434` kullanılır. Ollama'yı da konteynerde çalıştırmak için:
-  `docker compose --profile with-ollama up -d` ve `.env` içinde `OLLAMA_URL=http://ollama:11434`; modeller için
-  `docker exec devagents-ollama ollama pull qwen2.5-coder:7b`
-* `config/` ve `prompts/` klasörleri bağlıdır; düzenleyip kaydetmeniz yeterlidir.
+* Projeler konteynerde `/workspace` altına bağlanır. Arayüzde yol olarak klasör adını (`HobbyTracker`) yazmanız yeterlidir.
+* Derleme konteynerlerini ana makinenin Docker'ı başlatır; bunun için DevAgents'e Docker soketi bağlanır.
+  **Docker soketine erişim, ana makinede root yetkisine denktir.** Sunucuyu yalnızca güvenilen iç ağda açın.
+  Port varsayılan olarak yalnızca bu makineye açıktır; ekibe açarken önüne kimlik doğrulamalı bir ters vekil sunucu koyun.
+* `config/`, `src/Web/prompts/` ve `src/Web/architectures/` bağlıdır: düzenleyip kaydetmeniz yeterlidir.
+* Ollama ana makinede çalışıyorsa varsayılan olarak yalnızca `127.0.0.1` adresini dinler ve konteynerden erişilemez.
+  Docker ağını da dinlemesi için `sudo systemctl edit ollama` ile `[Service]` altına `Environment="OLLAMA_HOST=0.0.0.0"`
+  ekleyip `sudo systemctl restart ollama` çalıştırın. 11434 portunu güvenlik duvarıyla dış ağa kapatın.
+* Ollama'yı da konteynerde çalıştırmak için `docker compose --profile with-ollama up -d` ve `.env` içinde `OLLAMA_URL=http://ollama:11434`.
 
-## 5) VS Code eklentisi
+## 7) VS Code eklentisi
 
 ```bash
 cd vscode-extension
-npx @vscode/vsce package          # devagents-local-0.1.0.vsix üretir
+npx @vscode/vsce package
 code --install-extension devagents-local-0.1.0.vsix
 ```
-(Denemek için: klasörü VS Code'da açıp **F5**.)
 
-Komutlar (`Ctrl+Shift+P`): **DevAgents: Soru sor / kod geliştir**, **Seçili kod hakkında sor** (sağ tık menüsünde de var),
-**Son sonuçtaki dosyaları projeye uygula** (dosya dosya seçim + var olanlar için onay/diff), **Konuşma geçmişini sıfırla**.
+Komutlar (`Ctrl+Shift+P`): **DevAgents: Soru sor / kod geliştir**, **Seçili kod hakkında sor**,
+**Son sonuçtaki dosyaları projeye uygula**, **Konuşma geçmişini sıfırla**.
 
-Ayarlar: `devagents.serverUrl`, `devagents.contextMode` (`inline`: workspace dosyalarını API'ye gönderir, Docker ile de çalışır; `path`: sadece yol gönderir), `devagents.maxReviewIterations`.
-
-## 6) API
+## 8) API
 
 | Uç nokta | Açıklama |
 |---|---|
-| `POST /api/chat` | Tek seferde JSON sonuç |
 | `POST /api/chat/stream` | NDJSON olay akışı: `stage_start`, `token`, `stage_end`, `plan`, `final`, `error` |
-| `POST /api/context/preview` | Ajanlara gidecek bağlamı gösterir |
-| `GET /api/models`, `/api/config`, `/api/projects`, `/api/health` | Yardımcı uç noktalar |
-| `POST /v1/chat/completions` | OpenAI uyumlu uç nokta (model adı `csharp-multi-agent`); yalnızca son mesajı kullanır, proje bağlamı göndermez |
+| `POST /api/chat` | Aynı akış, tek seferde JSON sonuç |
+| `GET /api/architectures` | Mimari profilleri |
+| `POST /api/changes/revert` | `{ projectPath, snapshot }`: bir geliştirmenin değişikliklerini geri alır |
+| `POST /api/context/preview` | Ajanlara gidecek proje bağlamı |
+| `GET /api/health`, `/api/models`, `/api/config`, `/api/projects` | Yardımcı uç noktalar |
+| `POST /v1/chat/completions` | OpenAI uyumlu uç nokta (model `csharp-multi-agent`; Continue eklentisi için) |
+| `/scalar` | API dokümantasyonu |
 
 ```bash
-curl -X POST http://localhost:8080/api/chat -H "Content-Type: application/json" -d '{
-  "question": "Sipariş iptal endpointi ekle; stok geri yüklensin",
-  "projectPath": "C:\\src\\Shop",
-  "options": { "maxReviewIterations": 1, "modelOverrides": { "Coder": "qwen2.5-coder:14b" } }
+curl -N -X POST http://localhost:8080/api/chat/stream -H "Content-Type: application/json" -d '{
+  "question": "Hobilerimi kaydeden bir özellik geliştir",
+  "projectPath": "/home/ben/projeler",
+  "architecture": "clean-architecture",
+  "applyChanges": true,
+  "newProjectName": "HobbyTracker",
+  "options": { "askQuestions": false }
 }'
 ```
-Sonuçta `finalMarkdown` (Türkçe rapor), `files` (ayrıştırılmış kod/test dosyaları), `approved`, `analysis`, `review` alanları bulunur.
 
-Hatalar `application/problem+json` olarak döner ve `detail` alanında Türkçe mesaj bulunur: hatalı istek (boş soru,
-izin verilmeyen proje yolu) **400**, Ollama'ya ulaşılamazsa veya model hata verirse **502**, zaman aşımında **504**.
-Akış uç noktalarında hata bir `error` olayı olarak bildirilir.
+Hatalar `application/problem+json` olarak döner ve `detail` alanında Türkçe mesaj bulunur:
+- **400**: hatalı istek;
+- **409**: proje meşgul;
+- **502/504**: model hatası ya da zaman aşımı;
+- **503**: Docker veya git sorunu.
 
-**Continue** eklentisinden kullanmak için `config.yaml` örneği:
-
-```yaml
-name: Main Config
-version: 1.0.0
-schema: v1
-
-models:
-  - name: C# Multi-Agent Pipeline
-    provider: openai
-    model: csharp-multi-agent
-    apiBase: http://localhost:8080/v1
-    apiKey: NONE
-    roles:
-      - chat
-      - edit
-      - apply
-    default: true
-```
-
-## 7) Mimari (Clean Architecture)
+## 9) Geliştirme
 
 ```
-src/
-  DevAgents.Domain           Ajan rolleri, ajan planı (AgentPlan) kuralları, üretilen dosya, güvenli göreli yol kuralı. Bağımlılığı yok.
-  DevAgents.Application      Kullanım senaryoları: ajan pipeline'ı (Chat), proje bağlamı seçimi (Context), sistem bilgisi (SystemInfo),
-                             ajan çıktısı ayrıştırıcıları ve Infrastructure'ın uyguladığı arayüzler (Common/Interfaces).
-  DevAgents.Infrastructure   Ollama HTTP istemcisi ve ajan başına model çözümleme, prompt dosyaları, dosya sistemi erişimi.
-  DevAgents.Api              Minimal API uç noktaları, yapılandırma, hata → HTTP eşlemesi; web arayüzü (wwwroot) ve prompts/.
-tests/
-  DevAgents.Domain.UnitTests · DevAgents.Application.UnitTests · DevAgents.Infrastructure.IntegrationTests
+src/Domain           ajan rolleri, plan kuralları, derleme/test sonuçları, güvenli göreli yol
+src/Application      MediatR komut/sorguları: ajan akışı, geliştirme akışı (yaz-derle-düzelt-test), bağlam, mimariler
+src/Infrastructure   Ollama, dosya sistemi, git ile değişiklik takibi, Roslyn, Docker sandbox, eksik using düzeltici
+src/Web              minimal API uç noktaları, web arayüzü, prompts/, architectures/
+tests/               Domain.UnitTests · Application.UnitTests · Infrastructure.IntegrationTests · Application.FunctionalTests
 ```
-
-Bağımlılıklar içe doğrudur: `Api → Infrastructure → Application → Domain`. Application yalnızca arayüzleri
-(`ILanguageModelClient`, `IAgentModelResolver`, `IPromptProvider`, `IWorkspaceFileSystem`) tanır; Ollama'yı veya diski doğrudan görmez.
-
-| Değiştirmek istediğiniz | Yer |
-|---|---|
-| Bir ajanın talimatları / çıktı biçimi | `src/DevAgents.Api/prompts/*.md` (biçim değişirse `Application/Chat/Parsing` da) |
-| Hangi ajanın ne zaman çalıştığı | `Application/Chat/AgentPipeline.cs` |
-| Ajanlara giden mesajların bölümleri | `Application/Chat/AgentMessages.cs` |
-| Bağlama hangi dosyaların girdiği | `Application/Context/` |
-| Başka bir model sunucusu | `ILanguageModelClient`'ın yeni bir uygulaması + `Infrastructure/DependencyInjection.cs` |
 
 ```bash
-dotnet build      # kök dizinde: DevAgents.slnx
-dotnet test
+dotnet build
+dotnet test --filter "Category!=Slow"   # hızlı testler; "Slow" testleri gerçek derleme yapar (Docker gerekir)
 ```
 
-## Bilmeniz gerekenler
-
-* **Test Agent kodu çalıştırmaz**; test kodu yazar ve gerçek derleme yapmadan hata arar. Derleme/`dotnet test` doğrulaması için bir sonraki adım olarak ayrı bir "çalıştır-düzelt" döngüsü eklenebilir.
-* Kod dosyalarını yazma işlemi yalnızca VS Code eklentisinde, sizin onayınızla yapılır; API proje dosyalarını değiştirmez.
-* Küçük (7B) modellerde format bozulabilir; bu durumda `Coder`/`Analyzer` için daha büyük model seçin ya da `NumCtx` değerini artırın.
-* `Workspace:AllowedRoots` boşsa API makinedeki her klasörü okuyabilir. Yalnızca localhost'a açık tutun; Docker kurulumunda otomatik olarak `/workspace` ile sınırlıdır.
+Kod Jason Taylor şablonunun düzenini izler (MediatR 12.x, Apache 2.0 lisanslı). Açıklama satırları Türkçedir;
+ajanlara giden prompt'lar ve mesajlar İngilizcedir.

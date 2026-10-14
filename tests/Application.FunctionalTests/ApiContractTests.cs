@@ -40,6 +40,17 @@ public class ApiContractTests
         return [.. text.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(line => JsonNode.Parse(line)!)];
     }
 
+    [TestCase("/")]
+    [TestCase("/app.js")]
+    public async Task ShouldServeTheWebUiWithoutStaleCaching(string path)
+    {
+        using var response = await _client.GetAsync(path);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        // Güncellemeden sonra tarayıcı eski app.js'i önbellekten kullanmasın (mimari listesi boş görünüyordu).
+        response.Headers.CacheControl!.NoCache.ShouldBeTrue();
+    }
+
     [Test]
     public async Task ShouldStreamTheAnswerFlowAsNdjsonEvents()
     {

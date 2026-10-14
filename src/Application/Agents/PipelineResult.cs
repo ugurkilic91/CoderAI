@@ -35,9 +35,12 @@ public sealed record PipelineResult(
 /// <param name="ProjectPath">Kodun yazıldığı proje klasörü.</param>
 /// <param name="ProjectCreated">Proje bu istekte şablondan oluşturuldu mu.</param>
 /// <param name="Snapshot">Değişikliklerden önceki anlık görüntü; geri almak için kullanılır.</param>
-/// <param name="BuildAttempts">Kaç kez derlendi (ilk derleme + düzeltmeler).</param>
+/// <param name="BuildAttempts">Kaç kez derlendi (kod, testler ve her düzeltmeden sonra).</param>
 /// <param name="TestAttempts">Testler kaç kez çalıştırıldı.</param>
 /// <param name="Problem">Akış yarıda kaldıysa nedeni (örn. ajan dosya üretmedi).</param>
+/// <param name="UsingsAdded">Model kullanmadan otomatik eklenen using satırı sayısı.</param>
+/// <param name="FixRounds">Düzeltme ajanının derleme ya da test hatası için çalıştığı tur sayısı.</param>
+/// <param name="MembersRestored">Kodlama ajanının yanlışlıkla silip otomatik geri eklenen üye sayısı.</param>
 public sealed record DevelopmentSummary(
     string ProjectPath,
     string? Architecture,
@@ -48,4 +51,7 @@ public sealed record DevelopmentSummary(
     int BuildAttempts,
     TestRunResult? Tests,
     int TestAttempts,
-    string? Problem);
+    string? Problem,
+    int UsingsAdded = 0,
+    int FixRounds = 0,
+    int MembersRestored = 0);

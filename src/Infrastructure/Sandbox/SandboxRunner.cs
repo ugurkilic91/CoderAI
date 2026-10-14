@@ -67,7 +67,9 @@ internal sealed class DockerSandboxRunner(IOptionsMonitor<SandboxOptions> option
             // dotnet'in ev klasörü (NuGet önbelleği ve kurulu şablonlar burada kalır, sonraki çalıştırmalar hızlanır).
             "-e", $"HOME={SandboxHome}", "-e", $"DOTNET_CLI_HOME={SandboxHome}", "-e", $"NUGET_PACKAGES={SandboxHome}/.nuget/packages",
             "-e", "DOTNET_NOLOGO=1", "-e", "DOTNET_CLI_TELEMETRY_OPTOUT=1", "-e", "DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1",
-            "-e", "DOTNET_SKIP_WORKLOAD_INTEGRITY_CHECK=1", "-e", "NUGET_XMLDOC_MODE=skip"
+            "-e", "DOTNET_SKIP_WORKLOAD_INTEGRITY_CHECK=1", "-e", "NUGET_XMLDOC_MODE=skip",
+            // Derleyici mesajları İngilizce: hata ayrıştırıcı ve düzeltme ajanı İngilizce metinle çalışıyor.
+            "-e", "DOTNET_CLI_UI_LANGUAGE=en"
         ];
 
         var user = await ResolveUserAsync(settings.User, command.Mounts, cancellationToken);
@@ -147,7 +149,9 @@ internal sealed class ProcessSandboxRunner : ISandboxRunner
         {
             ["DOTNET_NOLOGO"] = "1",
             ["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1",
-            ["DOTNET_SKIP_FIRST_TIME_EXPERIENCE"] = "1"
+            ["DOTNET_SKIP_FIRST_TIME_EXPERIENCE"] = "1",
+            // Türkçe yerel ayarlı makinede de derleyici mesajları İngilizce olsun (ayrıştırıcı ve düzeltme ajanı için).
+            ["DOTNET_CLI_UI_LANGUAGE"] = "en"
         };
         return ProcessRunner.RunAsync("dotnet", arguments, Local(command.WorkingDirectory), environment, command.Timeout, onOutput, cancellationToken);
     }

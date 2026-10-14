@@ -130,9 +130,11 @@ internal sealed class DotnetBuildSandbox(
         return new BuildResult(false, errors, Tail(output.Output), stopwatch.Elapsed.TotalSeconds);
     }
 
-    // dotnet'in ev klasörü: NuGet önbelleği ve kurulu şablonlar burada kalıcıdır.
+    /// <summary>Sandbox'taki dotnet'in ev klasörünün bu makinedeki yeri: NuGet önbelleği ve kurulu şablonlar burada kalıcıdır.</summary>
+    internal static string HomeDirectory(StorageOptions storage) => Path.Combine(storage.ResolveDataDirectory(), "sandbox-home");
+
     private SandboxMount Home() =>
-        new(CreateSharedDirectory(Path.Combine(storage.CurrentValue.ResolveDataDirectory(), "sandbox-home")), DockerSandboxRunner.SandboxHome, ReadOnly: false);
+        new(CreateSharedDirectory(HomeDirectory(storage.CurrentValue)), DockerSandboxRunner.SandboxHome, ReadOnly: false);
 
     /// <summary>
     /// Sandbox kullanıcısı (proje sahibi) DevAgents'ten farklı olabileceği için klasörü herkese yazılabilir açıyoruz.

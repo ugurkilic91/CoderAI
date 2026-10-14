@@ -1,4 +1,6 @@
+using DevAgents.Application.Agents.Development;
 using DevAgents.Application.Agents.Parsing;
+using DevAgents.Application.Common.Models;
 using DevAgents.Domain.ValueObjects;
 using NUnit.Framework;
 using Shouldly;
@@ -97,5 +99,27 @@ public class GeneratedFileParserTests
     public void ShouldNotTreatACodeBlockWithoutAFileHeaderAsAFile()
     {
         GeneratedFileParser.Parse("Example:\n```csharp\nclass A {}\n```", GeneratedFileKind.Test).ShouldBeEmpty();
+    }
+}
+
+public class MissingMembersTests
+{
+    [Test]
+    public void ShouldReadMissingMembersOnlyFromCodeThatExistedBefore()
+    {
+        CompilerDiagnostic[] errors =
+        [
+            new("src/Application/TodoLists/GetTodos.cs", 43, 36, "CS1061",
+                "'IApplicationDbContext' does not contain a definition for 'TodoLists' and no accessible extension method 'TodoLists' accepting a first argument of type 'IApplicationDbContext' could be found"),
+            new("src/Infrastructure/Data/ApplicationDbContext.cs", 12, 14, "CS0535",
+                "'ApplicationDbContext' does not implement interface member 'IApplicationDbContext.TodoItems'"),
+            // Ajanın bu görevde yazdığı dosyadaki "üye yok" hatası: niyet belirsiz, geri ekleme yapılmaz.
+            new("src/Application/Hobbies/GetHobbies.cs", 5, 5, "CS1061", "'Hobby' does not contain a definition for 'Title'"),
+            new("src/Web/Endpoints/Hobbies.cs", 3, 3, "CS0246", "The type or namespace name 'Ok<>' could not be found")
+        ];
+
+        var missing = MissingMembers.From(errors, path => path.Contains("Hobb", StringComparison.Ordinal) || path.EndsWith("ApplicationDbContext.cs", StringComparison.Ordinal));
+
+        missing.ShouldBe([new MissingMember("IApplicationDbContext", "TodoLists"), new MissingMember("ApplicationDbContext", "TodoItems")]);
     }
 }

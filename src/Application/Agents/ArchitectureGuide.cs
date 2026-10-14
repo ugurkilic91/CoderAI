@@ -12,14 +12,18 @@ namespace DevAgents.Application.Agents;
 internal sealed class ArchitectureGuide
 {
     private const int MaxExampleChars = 4000;
+    private const int MaxFixExampleChars = 9000;
 
-    public static ArchitectureGuide None { get; } = new("", "", []);
+    private readonly IReadOnlyList<ArchitectureExample> _examples;
 
-    private ArchitectureGuide(string rulesText, string fullText, IReadOnlyCollection<string> examplePaths)
+    public static ArchitectureGuide None { get; } = new("", "", [], []);
+
+    private ArchitectureGuide(string rulesText, string fullText, IReadOnlyCollection<string> examplePaths, IReadOnlyList<ArchitectureExample> examples)
     {
         RulesText = rulesText;
         FullText = fullText;
         ExamplePaths = examplePaths;
+        _examples = examples;
     }
 
     /// <summary>Yalnızca kurallar (düzeltme ajanı için; bağlamı küçük tutuyoruz).</summary>
@@ -36,7 +40,7 @@ internal sealed class ArchitectureGuide
         var rules = $"## ARCHITECTURE: {profile.Name}\nFollow these rules exactly; they override general habits.\n\n{profile.Rules.Trim()}";
 
         // Örnekler önce projenin kendisinden okunur (en güncel ve doğru ad alanlarıyla); yoksa şablondan.
-        var examples = new StringBuilder();
+        var examples = new List<ArchitectureExample>();
         var examplePaths = new List<string>();
         foreach (var path in profile.ExampleFiles)
         {
@@ -44,7 +48,7 @@ internal sealed class ArchitectureGuide
                 ?? (profile.TemplateDirectory is null ? null : workspace.ReadFile(profile.TemplateDirectory, path));
             if (string.IsNullOrWhiteSpace(content))
                 continue;
-            examples.Append(FileBlock(path, content));
+            examples.Add(new ArchitectureExample(path, content));
             examplePaths.Add(path);
         }
         // Ek örnekler şablonun adıyla yazılmıştır (örn. CleanArchitecture.Application); proje adıyla değiştiriyoruz ki
@@ -55,13 +59,40 @@ internal sealed class ArchitectureGuide
             var content = profile.SourceName is { } sourceName && IsIdentifier(projectName)
                 ? example.Content.Replace(sourceName, projectName, StringComparison.Ordinal)
                 : example.Content;
-            examples.Append(FileBlock(profile.SourceName is { } source && IsIdentifier(projectName) ? example.Path.Replace(source, projectName, StringComparison.Ordinal) : example.Path, content));
+            examples.Add(new ArchitectureExample(
+                profile.SourceName is { } source && IsIdentifier(projectName) ? example.Path.Replace(source, projectName, StringComparison.Ordinal) : example.Path,
+                content));
         }
 
-        var full = examples.Length == 0
+        var full = examples.Count == 0
             ? rules
-            : $"{rules}\n\n### Reference files (copy their structure and style; adapt names and namespaces to the task)\n{examples.ToString().TrimEnd()}";
-        return new ArchitectureGuide(rules, full, examplePaths);
+            : $"{rules}\n\n### Reference files (copy their structure and style; adapt names and namespaces to the task)\n" +
+              string.Concat(examples.Select(example => FileBlock(example.Path, example.Content))).TrimEnd();
+        return new ArchitectureGuide(rules, full, examplePaths, examples);
+    }
+
+    /// <summary>
+    /// Düzeltme ajanı için: hata veren dosyalarla aynı bölümdeki (örn. src/Web, tests/Application.UnitTests) örnek dosyalar.
+    /// Ajan doğru using'leri, temel sınıfları ve test kurulumunu buradan görür; bütçe dolunca sığmayanlar atlanır.
+    /// </summary>
+    public string ExamplesFor(IEnumerable<string> paths)
+    {
+        var areas = paths.Select(Area).Where(area => area.Length > 0).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var blocks = new StringBuilder();
+        foreach (var example in _examples.Where(example => areas.Contains(Area(example.Path))))
+        {
+            var block = FileBlock(example.Path, example.Content);
+            if (blocks.Length + block.Length <= MaxFixExampleChars)
+                blocks.Append(block);
+        }
+        return blocks.ToString().TrimEnd();
+    }
+
+    // Dosyanın proje bölümü: "src/Web/Endpoints/Hobbies.cs" → "src/Web", "tests/Application.UnitTests/A/B.cs" → "tests/Application.UnitTests".
+    private static string Area(string path)
+    {
+        var parts = path.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length >= 3 ? $"{parts[0]}/{parts[1]}" : parts.Length == 2 ? parts[0] : "";
     }
 
     private static bool IsIdentifier([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] string? name) =>

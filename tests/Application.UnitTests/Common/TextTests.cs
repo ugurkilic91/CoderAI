@@ -42,3 +42,18 @@ public class MarkdownSectionsTests
         MarkdownSections.Remove(Analysis, AnalysisQuestions.SectionTitle).ShouldBe("### Goal\nStore hobbies.\n\n### Edge cases & risks\nNone.");
     }
 }
+
+public class ModelOutputTests
+{
+    [Test]
+    public void ShouldReplaceLongCodeBlocksAndKeepShortSignatures()
+    {
+        var longBlock = string.Join("\n", Enumerable.Range(1, 13).Select(line => $"     var x{line} = {line};"));
+        var analysis = "### Implementation plan\n1. Entity:\n     ```csharp\n" + longBlock + "\n     ```\n" +
+                       "2. Handler signature:\n   ```csharp\n   Task<int> Handle(CreateHobbyCommand request, CancellationToken cancellationToken);\n   ```\n";
+
+        ModelOutput.RemoveLongCodeBlocks(analysis).ShouldBe(
+            "### Implementation plan\n1. Entity:\n(code omitted)\n" +
+            "2. Handler signature:\n   ```csharp\n   Task<int> Handle(CreateHobbyCommand request, CancellationToken cancellationToken);\n   ```\n");
+    }
+}

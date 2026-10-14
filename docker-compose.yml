@@ -1,27 +1,51 @@
-# Kullanım:
-#   docker compose up -d --build                      # API + web arayüz (Ollama ana makinede çalışıyor)
+# Ekip sunucusu (on-prem) kurulumu.
+#
+#   cp .env.example .env    # yolları ve kullanıcı numaralarını düzenleyin
+#   docker compose up -d --build                        # DevAgents (Ollama ana makinede çalışıyor)
 #   docker compose --profile with-ollama up -d --build  # Ollama'yı da konteyner olarak çalıştır
 #
-# .env dosyası (isteğe bağlı):
-#   PROJECTS_DIR=C:/src          # ajanların okuyacağı projelerin üst klasörü
-#   OLLAMA_URL=http://ollama:11434   # with-ollama profili için
+# Kod projeye yazılırken derleme ve testler ayrı, ağı kapalı "sandbox" konteynerlerinde çalışır. Bu konteynerleri
+# ana makinenin Docker'ı başlatır; bu yüzden DevAgents'e Docker soketi bağlanır ve klasörlerin ana makinedeki
+# yolları (PathMappings) bildirilir. DİKKAT: Docker soketine erişim, ana makinede root yetkisine denktir;
+# DevAgents'i yalnızca güvenilen iç ağda çalıştırın (port varsayılan olarak yalnızca bu makineye açık).
+#
+# Ollama ana makinedeyse yalnızca 127.0.0.1'i dinler; konteynerden erişim için Ollama'da OLLAMA_HOST=0.0.0.0 ayarlayın
+# (systemd: "sudo systemctl edit ollama") ve 11434 portunu güvenlik duvarıyla dış ağa kapatın.
 
 services:
   devagents:
     build: .
     container_name: devagents
+    # Projelere yazılan dosyalar projelerin sahibine ait olsun diye ana makinedeki kullanıcıyla çalışır;
+    # docker grubu: sandbox konteynerlerini başlatabilmek için.
+    user: "${DEVAGENTS_UID:-1000}:${DEVAGENTS_GID:-1000}"
+    group_add:
+      - "${DOCKER_GID:-999}"
     ports:
-      - "127.0.0.1:8080:8080"        # yalnızca bu makineden erişilir
+      - "127.0.0.1:8080:8080"        # ekibe açmak için: "8080:8080" (ve bir ters vekil sunucu / kimlik doğrulama)
     environment:
       - Ollama__BaseUrl=${OLLAMA_URL:-http://host.docker.internal:11434}
       - Workspace__AllowedRoots__0=/workspace
+      - Storage__DataDirectory=/data
+      - HOME=/data/home
       - DOTNET_USE_POLLING_FILE_WATCHER=true   # bind mount'ta config değişikliklerini yakalar
+      # Konteynerdeki yol → ana makinedeki yol (sandbox bağlamaları ana makine yollarıyla yapılır).
+      - Sandbox__PathMappings__0__Container=/workspace
+      - Sandbox__PathMappings__0__Host=${PROJECTS_DIR:?.env içinde PROJECTS_DIR mutlak yol olarak tanımlanmalı}
+      - Sandbox__PathMappings__1__Container=/data
+      - Sandbox__PathMappings__1__Host=${DATA_DIR:?.env içinde DATA_DIR mutlak yol olarak tanımlanmalı}
+      - Sandbox__PathMappings__2__Container=/app/projects
+      - Sandbox__PathMappings__2__Host=${DEVAGENTS_DIR:?.env içinde DEVAGENTS_DIR (bu deponun mutlak yolu) tanımlanmalı}/projects
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - ${PROJECTS_DIR:-./projects}:/workspace:ro   # projeler salt-okunur bağlanır
-      - ./config:/app/config:ro                     # model seçimi: config/local.json
-      - ./src/Web/prompts:/app/prompts:ro          # prompt'ları yeniden derlemeden düzenleyin
+      - ${PROJECTS_DIR}:/workspace                  # ajanların okuyup yazdığı projeler (yazmadan önce yedek alınır)
+      - ${DATA_DIR}:/data                           # NuGet önbelleği, değişiklik geçmişi
+      - /var/run/docker.sock:/var/run/docker.sock   # sandbox konteynerleri için
+      - ./projects/CleanArchitecture:/app/projects/CleanArchitecture:ro   # mimari şablonu (yeni proje oluşturma)
+      - ./src/Web/architectures:/app/architectures:ro                      # mimari profilleri: yeniden derlemeden ekleyin
+      - ./src/Web/prompts:/app/prompts:ro                                  # prompt'ları yeniden derlemeden düzenleyin
+      - ./config:/app/config:ro                                            # model seçimi: config/local.json
     restart: unless-stopped
 
   ollama:

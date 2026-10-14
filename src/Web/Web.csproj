@@ -11,7 +11,9 @@
     <None Update="prompts\**\*.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <!-- Mimari profilleri (kurallar, örnekler, şablon komutları): ekip bunları kod değiştirmeden düzenleyebilir -->
     <None Update="architectures\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <!-- Örnek .cs dosyaları derlenmez (Compile'dan çıkarılır) ama örnek olarak çıktıya kopyalanır. -->
     <Compile Remove="architectures\**" />
+    <None Include="architectures\**\*.cs" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

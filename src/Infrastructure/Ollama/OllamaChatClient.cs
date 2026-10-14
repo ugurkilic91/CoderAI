@@ -46,7 +46,8 @@ internal sealed class OllamaChatClient(HttpClient http, IOptionsMonitor<OllamaOp
             Stream: true,
             settings.KeepAlive,
             [new OllamaMessage("system", systemPrompt), new OllamaMessage("user", userMessage)],
-            new OllamaModelOptions(agent.Temperature, agent.NumCtx, agent.NumPredict));
+            new OllamaModelOptions(agent.Temperature, agent.NumCtx, agent.NumPredict),
+            agent.Think);
 
         // Her çağrı Ollama:TimeoutMinutes ile sınırlı; HttpClient'ın kendi zaman aşımı kapalı (uzun cevaplar olabiliyor).
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);

@@ -15,8 +15,12 @@ var app = builder.Build();
 // Uç noktalarda fırlayan hatalar ProblemDetailsExceptionHandler ile HTTP cevabına çevrilir.
 app.UseExceptionHandler(options => { });
 
-// wwwroot: web sohbet arayüzü (index.html).
-app.UseFileServer();
+// wwwroot: web sohbet arayüzü (index.html). "no-cache": tarayıcı dosyayı her açılışta sunucuya doğrulatır
+// (değişmediyse 304 döner); böylece güncellemeden sonra eski app.js önbellekten kullanılmaz.
+app.UseFileServer(new FileServerOptions
+{
+    StaticFileOptions = { OnPrepareResponse = context => context.Context.Response.Headers.CacheControl = "no-cache" }
+});
 
 // API dokümantasyonu: /openapi/v1.json ve /scalar.
 app.MapOpenApi();

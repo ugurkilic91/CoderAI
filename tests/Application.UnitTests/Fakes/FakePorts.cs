@@ -95,25 +95,48 @@ internal sealed class FakeProjectWriter(FakeWorkspace workspace) : IProjectWrite
 /// <summary>Anlık görüntüden sonra yazılan dosyaları değişiklik olarak bildirir.</summary>
 internal sealed class FakeChangeTracker(FakeWorkspace workspace) : IChangeTracker
 {
+    /// <summary>İlk anlık görüntünün kimliği (sonrakiler sırayla numaralanır).</summary>
     public const string Snapshot = "0123456789abcdef0123456789abcdef01234567";
 
-    private HashSet<string> _before = [];
+    private readonly List<Dictionary<string, string>> _snapshots = [];
 
-    public int Snapshots { get; private set; }
+    public int Snapshots => _snapshots.Count;
 
     public Task<string> SnapshotAsync(string projectRoot, string message, CancellationToken cancellationToken)
     {
-        Snapshots++;
-        _before = [.. workspace.Files.Keys];
-        return Task.FromResult(Snapshot);
+        _snapshots.Add(new Dictionary<string, string>(workspace.Files, StringComparer.Ordinal));
+        return Task.FromResult(_snapshots.Count == 1 ? Snapshot : (_snapshots.Count - 1).ToString("x40"));
     }
 
     public Task<IReadOnlyList<FileChange>> GetChangesAsync(string projectRoot, string snapshot, CancellationToken cancellationToken) =>
-        Task.FromResult<IReadOnlyList<FileChange>>(
-            [.. workspace.Files.Keys.Where(path => !_before.Contains(path)).Order().Select(path => new FileChange(path, FileChangeKind.Created))]);
+        Task.FromResult(Changes(Find(snapshot)));
 
-    public Task<IReadOnlyList<FileChange>> RevertAsync(string projectRoot, string snapshot, CancellationToken cancellationToken) =>
-        GetChangesAsync(projectRoot, snapshot, cancellationToken);
+    /// <summary>Çalışma alanını anlık görüntüdeki hâline döndürür.</summary>
+    public Task<IReadOnlyList<FileChange>> RevertAsync(string projectRoot, string snapshot, CancellationToken cancellationToken)
+    {
+        var before = Find(snapshot);
+        var changes = Changes(before);
+        foreach (var change in changes)
+        {
+            if (before.TryGetValue(change.Path, out var content))
+                workspace.Files[change.Path] = content;
+            else
+                workspace.Files.Remove(change.Path);
+        }
+        return Task.FromResult(changes);
+    }
+
+    private Dictionary<string, string> Find(string snapshot) =>
+        _snapshots[snapshot == Snapshot ? 0 : Convert.ToInt32(snapshot, 16)];
+
+    private IReadOnlyList<FileChange> Changes(Dictionary<string, string> before) =>
+    [
+        .. workspace.Files.Keys.Union(before.Keys).Order(StringComparer.Ordinal)
+            .Select(path => (path, now: workspace.Files.GetValueOrDefault(path), then: before.GetValueOrDefault(path)))
+            .Where(file => file.now != file.then)
+            .Select(file => new FileChange(file.path,
+                file.then is null ? FileChangeKind.Created : file.now is null ? FileChangeKind.Deleted : FileChangeKind.Modified))
+    ];
 }
 
 /// <summary>İçinde "SYNTAX_ERROR" geçen .cs dosyaları için bir sözdizimi hatası bildirir.</summary>
@@ -122,6 +145,55 @@ internal sealed class FakeSyntaxChecker : ICodeSyntaxChecker
     public IReadOnlyList<CompilerDiagnostic> Check(IEnumerable<GeneratedFile> files) =>
         [.. files.Where(file => file.Content.Contains("SYNTAX_ERROR", StringComparison.Ordinal))
             .Select(file => new CompilerDiagnostic(file.Path, 1, 1, "CS1002", "; expected"))];
+}
+
+/// <summary>
+/// Tanımlanan dosyalarda CS0246 hatası varsa başına "using &lt;namespace&gt;;" ekler (dosyada yoksa).
+/// Varsayılan olarak hiçbir şeyi düzeltmez; böylece diğer testlerde hatalar düzeltme ajanına gider.
+/// </summary>
+internal sealed class FakeUsingFixer(FakeWorkspace workspace) : IUsingDirectiveFixer
+{
+    private readonly Dictionary<string, string> _namespaces = new(StringComparer.Ordinal);
+
+    public int Calls { get; private set; }
+
+    public FakeUsingFixer Resolve(string path, string ns)
+    {
+        _namespaces[path] = ns;
+        return this;
+    }
+
+    public Task<IReadOnlyList<UsingFix>> FixAsync(string projectRoot, IReadOnlyList<CompilerDiagnostic> errors, CancellationToken cancellationToken)
+    {
+        Calls++;
+        var fixes = new List<UsingFix>();
+        foreach (var path in errors.Where(error => error.Code == "CS0246").Select(error => error.File).Distinct())
+        {
+            if (_namespaces.TryGetValue(path, out var ns) && workspace.ReadFile(projectRoot, path) is { } content
+                && !content.Contains($"using {ns};", StringComparison.Ordinal))
+                fixes.Add(new UsingFix(path, $"using {ns};\n{content}", [ns]));
+        }
+        return Task.FromResult<IReadOnlyList<UsingFix>>(fixes);
+    }
+}
+
+/// <summary>Satır tabanlı basit geri ekleme: üyenin eski hâldeki satırını son kapanış parantezinin önüne koyar.</summary>
+internal sealed class FakeMemberRestorer : ICodeMemberRestorer
+{
+    public MemberRestore? Restore(string original, string current, IReadOnlyCollection<MissingMember> missing)
+    {
+        var restored = new List<string>();
+        foreach (var member in missing)
+        {
+            var line = original.Split('\n').FirstOrDefault(text => text.Contains(member.MemberName, StringComparison.Ordinal));
+            if (line is null || !current.Contains(member.TypeName, StringComparison.Ordinal)
+                || current.Contains(member.MemberName, StringComparison.Ordinal))
+                continue;
+            current = current.Insert(current.LastIndexOf('}'), line + "\n");
+            restored.Add($"{member.TypeName}.{member.MemberName}");
+        }
+        return restored.Count == 0 ? null : new MemberRestore(current, restored);
+    }
 }
 
 /// <summary>Sırayla önceden yazılmış derleme ve test sonuçlarını döndürür (son sonuç tekrar eder).</summary>

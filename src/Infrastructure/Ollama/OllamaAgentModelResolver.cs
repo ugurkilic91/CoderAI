@@ -35,6 +35,7 @@ internal sealed class OllamaAgentModelResolver(IOptionsMonitor<OllamaOptions> op
             overriddenModel ?? agent?.Model ?? defaults.Model ?? FallbackModel,
             agent?.Temperature ?? defaults.Temperature ?? FallbackTemperature,
             agent?.NumCtx ?? defaults.NumCtx ?? FallbackNumCtx,
-            agent?.NumPredict ?? defaults.NumPredict ?? FallbackNumPredict);
+            agent?.NumPredict ?? defaults.NumPredict ?? FallbackNumPredict,
+            agent?.Think ?? defaults.Think ?? false);
     }
 }

@@ -6,8 +6,10 @@ const history = [];
 let lastResult = null;
 
 const STAGES = {
-  translate_in: 'Türkçe → İngilizce', context: 'Proje bağlamı', analyze: 'Analiz', code: 'Kodlama',
-  test: 'Test', review: 'Review', revise: 'Kodlama (revizyon)', translate_out: 'İngilizce → Türkçe'
+  translate_in: 'Türkçe → İngilizce', route: 'Router', context: 'Proje bağlamı', answer: 'Cevap', analyze: 'Analiz',
+  code: 'Kodlama', test: 'Test', review: 'Review', revise: 'Kodlama (revizyon)', translate_out: 'İngilizce → Türkçe',
+  scaffold: 'Proje oluşturuluyor', syntax: 'Sözdizimi kontrolü', write: 'Dosyalar yazılıyor', build: 'Derleme',
+  usings: 'Eksik using’ler', restore: 'Silinen üyeler geri ekleniyor', fix: 'Düzeltme', test_run: 'Testler çalışıyor'
 };
 
 const cfg = () => vscode.workspace.getConfiguration('devagents');

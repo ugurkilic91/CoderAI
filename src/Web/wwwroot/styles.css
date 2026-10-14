@@ -145,4 +145,14 @@ dialog pre { white-space: pre-wrap; font: 12px/1.5 var(--mono); background: var(
 .dev select, .dev input:not([type=checkbox]) { margin-top: 6px; }
 .dev .hint { font-size: 12px; color: var(--side-mute); margin: 8px 0 0; }
 .dev .hint.bad { color: var(--bad); }
+.dev .modes { border: 0; margin: 14px 0 0; padding: 0; min-width: 0; }
+.dev .modes legend { font-size: 13px; font-weight: 600; color: #fff; padding: 0; margin-bottom: 2px; }
+.side .dev label.mode { display: flex; gap: 8px; align-items: flex-start; margin: 6px 0 0; padding: 8px 10px; font-weight: 400;
+  border: 1px solid #38495f; border-radius: 6px; cursor: pointer; }
+.side .dev label.mode:has(input:checked) { border-color: var(--accent); background: #22324a; }
+.dev .mode input { margin-top: 3px; }
+.dev .mode b { display: block; font-weight: 600; }
+.dev .mode small { display: block; font-size: 12px; color: var(--side-mute); }
+.dev #applyOptions { margin-top: 10px; }
+.side input.need { outline: 2px solid var(--bad); }
 .verdict.bad { background: color-mix(in srgb, var(--bad) 18%, transparent); color: var(--bad); }
