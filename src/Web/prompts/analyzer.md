@@ -29,4 +29,5 @@ Rules:
 - Follow the existing architecture. Do not introduce new frameworks or patterns unless the request requires it.
 - If an ARCHITECTURE section is given, the plan must follow it exactly: list every file to create or modify with the exact path its rules prescribe (including files that must be updated, such as DbContext registrations).
 - Never invent files, types or methods that contradict the context. If something is not visible, say so.
-- No full code listings; short signatures are fine.
+- Do NOT write code: no code blocks with class bodies or method implementations. Describe types and methods in prose with
+  one-line signatures. The coding agent writes all code; the whole analysis should stay under about 80 lines.

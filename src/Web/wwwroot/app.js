@@ -26,17 +26,19 @@
     syntax: 'Sözdizimi kontrolü (Roslyn)',
     write: 'Dosyalar projeye yazılıyor',
     build: 'Derleme (dotnet build · Docker)',
+    usings: 'Eksik using’ler ekleniyor (otomatik, modelsiz)',
+    restore: 'Silinen üyeler geri ekleniyor (otomatik, modelsiz)',
     fix: 'Düzeltme Agent',
     test_run: 'Testler çalışıyor (dotnet test · Docker)'
   };
 
-  const state = { history: [], files: [], busy: false, abort: null, lastResult: null };
+  const state = { history: [], files: [], busy: false, abort: null, lastResult: null, roots: [] };
   const el = {
     messages: $('#messages'), empty: $('#empty'), input: $('#input'), send: $('#sendBtn'),
     project: $('#projectPath'), extra: $('#extra'), iters: $('#iters'), trOut: $('#trOut'),
     fileInput: $('#fileInput'), fileList: $('#fileList'), status: $('#status'), side: $('#side'),
-    architecture: $('#architecture'), apply: $('#apply'), applyOptions: $('#applyOptions'), newProject: $('#newProject'),
-    newProjectName: $('#newProjectName'), askQuestions: $('#askQuestions'), sandboxStatus: $('#sandboxStatus')
+    architecture: $('#architecture'), applyOptions: $('#applyOptions'), newProjectName: $('#newProjectName'),
+    askQuestions: $('#askQuestions'), modeHint: $('#modeHint'), sandboxStatus: $('#sandboxStatus'), projectLabel: $('#projectLabel')
   };
 
   /* ---------------- markdown (small, dependency-free) ---------------- */
@@ -126,6 +128,7 @@
         const o = new Option(a.name, a.id); o.title = a.description; o.dataset.canCreate = a.canCreateProjects;
         el.architecture.append(o);
       });
+      updateDevOptions();
       if (cfg.sandbox) {
         el.sandboxStatus.textContent = (cfg.sandbox.available ? '✅ ' : '⚠️ ') + 'Derleme/test ortamı: ' + cfg.sandbox.message;
         el.sandboxStatus.classList.toggle('bad', !cfg.sandbox.available);
@@ -134,9 +137,11 @@
 
     try {
       const p = await fetch('/api/projects').then(r => r.json());
+      state.roots = p.roots || [];
+      state.sampleProject = ((p.projects || [])[0] || {}).name;
+      updateDevOptions();
       const dl = $('#projectList');
       (p.projects || []).forEach(x => dl.append(new Option(x.path, x.name)));
-      if ((p.roots || []).length && !el.project.value) el.project.placeholder = 'Klasör adı, örn: ' + ((p.projects[0] || {}).name || 'MyApp');
     } catch { /* optional */ }
   }
   function setStatus(ok, text) {
@@ -185,16 +190,44 @@
   };
   $('#menuBtn').onclick = () => el.side.classList.toggle('open');
 
-  // "Projeye uygula" açıkken ek seçenekler görünür; yeni projede proje alanı üst klasör anlamına gelir.
-  function updateDevOptions() {
-    el.applyOptions.hidden = !el.apply.checked;
-    el.newProjectName.hidden = !el.newProject.checked;
-    el.project.placeholder = el.apply.checked && el.newProject.checked
-      ? 'Yeni projenin açılacağı üst klasör (boşsa çalışma alanı kökü)'
-      : 'C:\\src\\MyApp  veya  /workspace/MyApp';
+  // Çalışma şekli: "suggest" (sadece öner), "apply" (mevcut projeye uygula) ya da "new" (şablondan yeni proje).
+  const devMode = () => ($('input[name=devMode]:checked') || {}).value || 'suggest';
+  function setDevMode(mode) {
+    $(`input[name=devMode][value=${mode}]`).checked = true;
+    updateDevOptions();
   }
-  el.apply.onchange = updateDevOptions;
-  el.newProject.onchange = updateDevOptions;
+
+  // Uygulama modlarında ek seçenekler görünür; yeni projede "Proje klasörü" alanı, projenin açılacağı üst klasördür.
+  function updateDevOptions() {
+    const mode = devMode();
+    el.applyOptions.hidden = mode === 'suggest';
+    el.newProjectName.hidden = mode !== 'new';
+    el.newProjectName.classList.remove('need');
+    el.projectLabel.textContent = mode === 'new' ? 'Yeni projenin açılacağı klasör' : 'Proje klasörü';
+    // Yeni projede üst klasör boş bırakılabilir mi: yalnızca sunucuda çalışma alanı kökü tanımlıysa (Docker'da /workspace).
+    el.project.placeholder = mode !== 'new'
+      ? (state.roots.length ? `Klasör adı, örn: ${state.sampleProject || 'MyApp'}` : 'C:\\src\\MyApp  veya  /workspace/MyApp')
+      : state.roots.length ? `Boşsa: ${state.roots[0]}`
+      : `Örn: ${navigator.platform.startsWith('Win') ? 'C:\\src' : '/home/ben/projeler'}`;
+
+    let hint = '', bad = false;
+    if (mode === 'new') {
+      // Yeni proje için şablonu olan bir mimari gerekir; seçili değilse ilk uygun mimariyi seçiyoruz.
+      const creatable = [...el.architecture.options].filter(o => o.dataset.canCreate === 'true');
+      if (!creatable.some(o => o.selected) && creatable.length) creatable[0].selected = true;
+      bad = creatable.length === 0;
+      hint = bad
+        ? 'Şablonu tanımlı bir mimari yok; yeni proje oluşturulamaz.'
+        : `Proje “${el.architecture.selectedOptions[0].text}” şablonundan, yukarıdaki klasörün içinde açılır. Sonraki istekler bu projeye devam eder.`;
+    } else if (mode === 'apply') {
+      hint = 'Yazmadan önce proje yedeklenir; sonuç kartındaki “Değişiklikleri geri al” ile geri dönebilirsiniz.';
+    }
+    el.modeHint.textContent = hint;
+    el.modeHint.classList.toggle('bad', bad);
+  }
+  document.querySelectorAll('input[name=devMode]').forEach(r => r.onchange = updateDevOptions);
+  el.architecture.onchange = updateDevOptions;
+  el.newProjectName.oninput = () => el.newProjectName.classList.remove('need');
   document.querySelectorAll('.sample').forEach(b => b.onclick = () => { el.input.value = b.textContent; el.input.focus(); });
 
   /* ---------------- chat ---------------- */
@@ -227,6 +260,13 @@
   async function onSend() {
     const question = el.input.value.trim();
     if (!question || state.busy) return;
+    const mode = devMode(), applying = mode !== 'suggest';
+    if (mode === 'new' && !el.newProjectName.value.trim()) {
+      el.side.classList.add('open');
+      el.newProjectName.classList.add('need');
+      el.newProjectName.focus();
+      return;
+    }
     el.input.value = ''; el.input.style.height = 'auto';
     addUser(question);
 
@@ -241,11 +281,11 @@
       history: state.history,
       options: {
         mode: $('#mode').value, maxReviewIterations: +el.iters.value, translateOutput: el.trOut.checked, modelOverrides: overrides,
-        askQuestions: el.apply.checked && el.askQuestions.checked
+        askQuestions: applying && el.askQuestions.checked
       },
       architecture: el.architecture.value || null,
-      applyChanges: el.apply.checked,
-      newProjectName: el.apply.checked && el.newProject.checked ? (el.newProjectName.value.trim() || null) : null
+      applyChanges: applying,
+      newProjectName: mode === 'new' ? el.newProjectName.value.trim() : null
     };
 
     const msg = make('div', 'msg bot');
@@ -351,7 +391,7 @@
       if (dev.build) foot.append(make('span', 'verdict ' + (dev.build.succeeded ? 'ok' : 'bad'), dev.build.succeeded ? 'Build başarılı' : 'Build başarısız'));
       if (dev.tests) foot.append(make('span', 'verdict ' + (dev.tests.failed === 0 && dev.tests.total > 0 ? 'ok' : 'bad'), `Testler ${dev.tests.passed}/${dev.tests.total}`));
       // Yeni oluşturulan projeye sonraki isteklerde de devam edilsin.
-      if (dev.projectCreated) { el.project.value = dev.projectPath; el.newProject.checked = false; el.newProjectName.value = ''; updateDevOptions(); }
+      if (dev.projectCreated) { el.project.value = dev.projectPath; el.newProjectName.value = ''; setDevMode('apply'); }
       if (dev.snapshot && dev.changes.length) {
         const undo = make('button', null, 'Değişiklikleri geri al'); undo.type = 'button';
         undo.onclick = async () => {

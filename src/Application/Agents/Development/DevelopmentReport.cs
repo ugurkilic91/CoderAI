@@ -33,10 +33,17 @@ internal static class DevelopmentReport
 
         if (summary.Build is { } build)
         {
-            var attempts = summary.BuildAttempts > 1 ? $" ({summary.BuildAttempts} derleme; hatalar düzeltme ajanıyla giderildi)" : "";
+            // Neyin ne kadar uğraştırdığı: derleme sayısı, otomatik using'ler, düzeltme ajanı turları.
+            List<string> details = [$"{summary.BuildAttempts} derleme"];
+            if (summary.UsingsAdded > 0)
+                details.Add($"{summary.UsingsAdded} eksik using otomatik eklendi");
+            if (summary.MembersRestored > 0)
+                details.Add($"silinen {summary.MembersRestored} üye otomatik geri eklendi");
+            if (summary.FixRounds > 0)
+                details.Add($"{summary.FixRounds} düzeltme turu");
             report.Append(build.Succeeded
-                ? $"**Build:** ✅ başarılı{attempts}\n"
-                : $"**Build:** ❌ {build.Errors.Count} hata ({summary.BuildAttempts} derleme denendi)\n");
+                ? $"**Build:** ✅ başarılı ({string.Join("; ", details)})\n"
+                : $"**Build:** ❌ {build.Errors.Count} hata ({string.Join("; ", details)})\n");
             foreach (var error in build.Errors.Take(MaxListedErrors))
                 report.Append($"- `{error}`\n");
         }

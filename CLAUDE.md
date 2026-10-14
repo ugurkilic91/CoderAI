@@ -4,80 +4,121 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-DevAgents: a multi-agent coding assistant built on a **local Ollama** server. An ASP.NET Core minimal-API app runs the agent pipeline, serves a static web chat UI (`src/DevAgents.Api/wwwroot/`), and is used by a plain-JS VS Code extension (`vscode-extension/`). The target audience is Turkish: user-facing strings (exception messages, router reasons, UI, README) are Turkish, while agent prompts, code and code comments are English.
+DevAgents is an on-prem, multi-agent C# coding tool that runs on a **local Ollama** server. A developer writes a request in Turkish ("hobilerimi kaydeden kodu geliştir"). The request is translated to English and routed. Then agents analyze it, write code in the selected architecture, write the files into the project, build in a Docker sandbox, fix errors, write and run unit tests, and report back in Turkish.
+
+The audience is Turkish developers in a company team:
+- User-facing strings are Turkish: UI, exception and validation messages, and the report.
+- **Code comments are Turkish**: XML doc on types and methods, plus short step comments inside methods (e.g. `// 4) Burada test agent'a ihtiyaç duyduk: ...`). Keep this style in new code.
+- Agent prompts and the messages sent to models are English.
 
 ## Commands
 
 ```bash
-dotnet build                                   # DevAgents.slnx at the repo root
-dotnet test                                    # all test projects
-dotnet test tests/DevAgents.Application.UnitTests --filter "FullyQualifiedName~AgentPipelineTests"   # one class
-cd src/DevAgents.Api && dotnet run             # → http://localhost:8080 (needs Ollama at Ollama:BaseUrl)
-
-docker compose up -d --build                   # API + UI; Ollama on the host by default
-docker compose --profile with-ollama up -d --build
-
-cd vscode-extension && npx @vscode/vsce package   # no build step; F5 in that folder to debug
+dotnet build                                       # DevAgents.slnx; output goes to artifacts/ (ArtifactsPath)
+dotnet test --filter "Category!=Slow"              # fast tests (~160)
+dotnet test                                        # + Slow: real dotnet build in Process and Docker sandbox modes
+dotnet test tests/Application.UnitTests --filter "FullyQualifiedName~DevelopmentWorkflowTests"   # one class
+cd src/Web && dotnet run                           # → http://localhost:8080 (Ollama at Ollama:BaseUrl, Docker for the sandbox)
+docker compose up -d --build                       # team server; needs .env (see .env.example)
 ```
 
-`src/Directory.Build.props` sets `net10.0`, nullable and **`TreatWarningsAsErrors`** for every project; `tests/Directory.Build.props` imports it and adds NUnit 5 (in NUnit 5, `Assert.ThrowsAsync`/`CatchAsync` return a Task and must be awaited). Both files live below the root on purpose, so they do not affect the projects under `projects/`.
+The root `Directory.Build.props` sets `net10.0`, nullable, ImplicitUsings and **`TreatWarningsAsErrors`**. `Directory.Packages.props` does central package management, so versions live there and not in the csproj files. The empty `projects/Directory.Build.props` and `projects/Directory.Packages.props` stop these settings from leaking into the projects under `projects/`.
 
-## Architecture (Clean Architecture)
+**MediatR is pinned to 12.x (Apache 2.0) on purpose**, because 13+ has a commercial license. Do not upgrade it.
 
-Dependencies point inward: `Api → Infrastructure → Application → Domain` (Api also references Application).
+Tests use NUnit 5 + Shouldly (+ Moq). In NUnit 5, `Assert.ThrowsAsync` returns a Task, so prefer `await Should.ThrowAsync<T>(...)`.
 
-- **Domain**: `AgentRole` (agent names, also config/override keys; `SettingsFallback()`: Router and BackTranslator use the Translator's settings), `AgentPlan` (+ `Normalize()` planning rules), `GeneratedFile`, `RelativePath.Normalize` (rejects `..` and `:` paths).
-- **Application**: use cases per feature folder (`Chat/`, `Context/`, `SystemInfo/`) and ports in `Common/Interfaces` (`ILanguageModelClient`, `IAgentModelResolver`, `IPromptProvider`, `IWorkspaceFileSystem`). Application never touches HTTP or the disk directly. `DependencyInjection.AddApplication` binds the `Pipeline` and `Workspace` sections.
-- **Infrastructure**: `Ollama/` (HTTP client streaming NDJSON, `OllamaOptions`, `OllamaAgentModelResolver`), `Prompts/FilePromptProvider`, `Workspace/FileSystemWorkspace` (path resolution under `AllowedRoots`, file enumeration). Binds the `Ollama` section.
-- **Api**: composition root. `Hosting/` (config loading, exception → status mapping), `Endpoints/` (thin minimal-API handlers), `OpenAi/` (contracts for the `/v1` shim), `wwwroot/`, `prompts/`, `appsettings.json`.
+## Architecture
 
-### Pipeline (`Application/Chat/AgentPipeline.cs`)
-Each stage name below is emitted as a streaming event (`PipelineStages`):
+The solution follows Jason Taylor's Clean Architecture template (`projects/CleanArchitecture`, the `ca-sln` template): `Domain ← Application ← Infrastructure ← Web`. It follows the template's conventions:
+- a command or query and its handler live in one file, with the validator in a separate file;
+- `DependencyInjection.AddXServices(this IHostApplicationBuilder)` lives in namespace `Microsoft.Extensions.DependencyInjection`;
+- endpoints are `IEndpointGroup` classes with named static handlers that take `ISender`;
+- MediatR pipeline behaviours handle logging, validation, performance and unhandled exceptions. Stream requests have their own behaviours in `StreamBehaviours.cs`.
 
-1. `translate_in`: Translator agent, Turkish → English.
-2. `route`: Router agent returns JSON, which `Chat/Parsing/RouterDecisionParser` turns into a normalized `AgentPlan`. If it can't be read, the **full pipeline** runs. The Router is skipped when the request sets `options.stages` (manual) or `options.mode: "full"`.
-3. `context`: `IProjectContextBuilder.Build`, only when `plan.NeedsContext` (otherwise `ProjectContext.None`).
-4. `answer` (Analyzer model + `answerer` prompt) **or** `analyze` → `code` → loop of `test` → `review` → `revise`. The loop ends when the review is approved, when no code stage is planned, or when it hits `MaxReviewIterations` (clamped 0–5).
-5. `translate_out`: BackTranslator, English → Turkish, one report section at a time (`PipelineReport`).
+Layers:
+- **Domain**: `AgentRole`, `AgentPlan` (planning rules), `GeneratedFile`, `RelativePath.Normalize` (rejects `..` and `:`), and `BuildResult`/`CompilerDiagnostic`, `TestRunResult`, `FileChange`.
+- **Application**: use cases and ports.
+  - `Agents/Commands/RunAgentPipeline` is the main use case. It is a stream request: a `Channel` bridges pipeline callbacks to `IAsyncEnumerable<PipelineEvent>`.
+  - Other use cases live in `Context/`, `SystemInfo/`, `Architectures/` and `Changes/` (revert).
+  - Ports are in `Common/Interfaces`. Application never touches HTTP, Docker, git or the disk directly.
+- **Infrastructure**:
+  - `Ollama/`: streaming client and per-agent model resolution.
+  - `Prompts/`, `Architectures/FileArchitectureCatalog`.
+  - `Workspace/`: path resolution under `AllowedRoots`, and the writer, which never writes into `.git`/`bin`/`obj` and keeps BOMs.
+  - `SourceControl/GitChangeTracker`, `CodeAnalysis/` (Roslyn), `Sandbox/`.
+- **Web**: composition root.
+  - `Endpoints/` covers chat, stream, context, systeminfo, architectures, changes, and the OpenAI-compatible `/v1/chat/completions`.
+  - `Infrastructure/ProblemDetailsExceptionHandler` maps exception → status: validation/path 400, busy project 409, model 502/504, sandbox/git 503.
+  - Also here: `wwwroot/` (UI, served with `Cache-Control: no-cache`), `prompts/`, `architectures/`.
 
-Helpers: `AgentRunner` handles the per-run work (it resolves models, streams tokens and records `Models`). `AgentMessages` builds every agent's user message. `AgentOutputs` holds what the agents produced so far.
+### Pipeline (`Application/Agents/AgentPipeline.cs`)
+The flow runs these stages in order. Each one is streamed as `stage_start`/`token`/`stage_end` with names from `PipelineStages`.
+1. `translate_in`: only when the text looks Turkish (`TurkishText`, `Pipeline:DetectInputLanguage`).
+2. `scaffold`: only for a new project. It runs `dotnet new <template>` in the sandbox.
+3. `route`: Router JSON → `AgentPlan`. If it cannot be parsed, the full pipeline runs. `options.mode`/`options.stages` override the router.
+4. `context`.
+5. `answer` or `analyze`. When `options.askQuestions` is set and the analysis has "Questions for the user", the run stops so the user can answer.
+6. One of two paths:
+   - With `ApplyChanges`: `DevelopmentWorkflow`.
+   - Without it: code → test → review/revise loop (suggestion only).
+7. `translate_out`: section by section (`PipelineReport`, `ProtectedMarkdown`).
 
-### Prompts are parsing contracts
-System prompts are `src/DevAgents.Api/prompts/*.md`; names are in `Chat/AgentPrompts`. If you change an output format, update its parser too:
-- Router → one JSON object (`RouterDecisionParser`).
-- Reviewer → `VERDICT: APPROVED` / `VERDICT: NEEDS_CHANGES` within the first 400 chars (`ReviewVerdictParser`).
-- Coder/Tester → `### FILE: relative/path` + one fenced block (`GeneratedFileParser`; also parsed client-side in `wwwroot/app.js`).
-- Back-translation → `Common/Text/ProtectedMarkdown` swaps code blocks for `[[CODE_n]]` placeholders and appends any block the translator dropped.
-- The `## REQUEST`, `## ANALYSIS`, `## IMPLEMENTATION`, … section names in `AgentMessages` are referenced by the prompts.
-- `<think>…</think>` blocks are removed from every answer (`Common/Text/ModelOutput`).
+`Development/DevelopmentWorkflow` (apply mode):
+1. The coder writes the code. Test files the coder wrote are dropped, because the tester writes the tests.
+2. Snapshot the project.
+3. Roslyn syntax check (`syntax`), then `write`, then `build`.
+4. If the build fails, the deterministic fixes run first, **without a model**. They don't count as fixer attempts:
+   - `usings`: `UsingDirectiveFixer` adds missing `using`s. It finds the namespace in the project's sources (respecting ProjectReferences) and in the packages and frameworks listed in `project.assets.json`.
+   - `restore`: `RoslynMemberRestorer` re-adds members the coder dropped from an existing file. It uses the file's pre-run copy in `DevelopmentState.Originals`, and only touches members that CS1061/CS0117 errors in pre-existing code (or CS0535) ask for.
+   - Then `fix`: the fixer agent gets the errors, the current files and the architecture examples for the failing area. This runs up to `Development:MaxBuildFixAttempts` times, and stops early if the fixer changes nothing.
+5. A second snapshot is taken. The tester writes the tests → build → `test_run`, and failing tests go to the fixer. If the tests can't be made to compile, only the test step is reverted to that snapshot and the project is rebuilt, so the project stays buildable.
+6. An informational review that gets the real build/test results.
+7. `GetChangesAsync`.
 
-`FilePromptProvider` reads `AppContext.BaseDirectory/prompts`, i.e. the **build-output copy**. With `dotnet run`, edits take effect after the next build. In Docker the source folder is bind-mounted, so edits apply immediately.
+The analysis is passed through `ModelOutput.RemoveLongCodeBlocks`. The 14B analyzer tends to write full code, which otherwise overflows `NumCtx` for the later agents.
 
-### Wire contract
-`PipelineResult`, `PipelineEvent`, `AgentPlan`, `GeneratedFile` and `ContextInfo` are serialized as they are (camelCase) and consumed by `wwwroot/app.js` and `vscode-extension/extension.js`. Keep shapes in sync across all three. Don't add public properties to these records (use methods, as `AgentPlan.RunsAnyAgent()` does). `PipelineEvent.Data` is `object`, so it serializes with its runtime type.
+A project can only run one apply job at a time (`ProjectLocks`).
 
-### Configuration and model resolution
-- `Hosting/ConfigurationExtensions.AddDevAgentsConfiguration` loads, in order: `appsettings.json` → `config/local.json` → env vars (`Ollama__Agents__Coder__Model=...`).
-  - `config/local.json` is looked up at `<contentRoot>/config/local.json` (Docker), at `<repo>/config/local.json` (`dotnet run` from `src/DevAgents.Api`), and at `$DEVAGENTS_CONFIG`.
-  - Files reload on change and everything reads `IOptionsMonitor.CurrentValue`.
-- `OllamaAgentModelResolver`: request `modelOverrides[agent]` (model only) → `Agents[agent]` → `Agents[fallback agent]` → `Defaults` → built-in fallback values.
-- `/api/config` lists `Enum.GetValues<AgentRole>()`, so a new agent needs an `AgentRole` member, a prompt, a call in the pipeline and (for the UI's model pickers) an entry in `AGENTS` in `wwwroot/app.js`.
+### Architecture profiles (`src/Web/architectures/<id>/`)
+- `profile.json` holds the name, `templateDirectory`, `sourceName`, the `newProject` dotnet args, `testProjects`, `examples` (paths read from the project, falling back to the template) and `extraExamples` (files in `examples/`).
+- `rules.md` is English, written for the agents.
+- `ArchitectureGuide` builds the text the agents get. The template name in examples (`sourceName`) is replaced with the project folder name.
+- The `.cs` files under `architectures/` are excluded from compilation but copied to the output (`Web.csproj`).
+- To add a company architecture, add a folder. No code change is needed.
 
-### Project context (`Application/Context/`)
-`ProjectContextBuilder` merges the indexed files (`IWorkspaceFileSystem.EnumerateFiles`, filtered by `ProjectFileFilter`: extensions, excluded folders, `SensitiveFiles`, size and count limits) with the client's inline files. Pinned files bypass the filter. The context is an overview (`ProjectOverview`: csproj TFM/packages/refs, layer hints, shallow-first file tree) plus file contents within `Workspace:MaxContextChars`. `ContextFileSelector` adds files in this order:
-1. Pinned files (over budget if needed).
-2. csproj, `Program.cs`/`Startup.cs`, README.
-3. Keyword-scored files (`QueryTokenizer`): a path match counts more than a content match, at most 3 per folder.
-4. One small `.cs` exemplar per folder not yet represented.
+### Sandbox, data and change tracking
+- `IBuildSandbox` = `DotnetBuildSandbox`. `Sandbox:Mode` is either `Docker` (default) or `Process`.
+  - Docker mode runs `docker run --rm` with memory, CPU and pids limits, as the project folder owner (`User: auto`).
+  - Restore runs with the network on. Build and test run with `--network none`.
+  - `DOTNET_CLI_UI_LANGUAGE=en` keeps compiler output English for the parsers.
+- `Storage:DataDirectory` (default `~/.devagents`) holds:
+  - `sandbox-home` = `/home/sandbox` in the container: the NuGet cache and installed templates;
+  - `history/` with the change tracking.
+- When DevAgents itself runs in a container, `Sandbox:PathMappings` maps container paths to host paths for the sandbox mounts (see `docker-compose.yml`).
+- `GitChangeTracker` keeps a separate bare repo per project in `DataDirectory/history` (`git --git-dir X --work-tree Y`) and never touches the project's own `.git`. `POST /api/changes/revert` restores a snapshot.
 
-When `Workspace:AllowedRoots` is empty, any local path is allowed. Docker sets it to `/workspace`, where the projects are mounted read-only.
+### Contracts that must stay in sync
+- Prompts are parsing contracts. If you change one of these output formats, update its parser:
+  - Router → one JSON object.
+  - Reviewer → `VERDICT: APPROVED|NEEDS_CHANGES`.
+  - Coder/Tester/Fixer → `### FILE: path` + one fenced block, then `### NOTES`.
+  - Analyzer → `### Questions for the user`.
+- The `## SECTION` names in `AgentMessages` are referenced by `prompts/*.md`.
+- `PipelineResult`, `PipelineEvent`, `AgentPlan`, `GeneratedFile`, `DevelopmentSummary` and `ContextInfo` are serialized camelCase and consumed by `wwwroot/app.js` and `vscode-extension/extension.js`. A new stage needs a label in `STAGES` in `app.js`.
+- `FilePromptProvider` and `FileArchitectureCatalog` read from `AppContext.BaseDirectory`, i.e. the build output. With `dotnet run`, edits apply after the next build. In Docker those folders are bind-mounted.
 
-### HTTP surface (`Api/Endpoints/`)
-- `POST /api/chat` (JSON) and `POST /api/chat/stream` (NDJSON: `stage_start`, `token`, `stage_end`, `plan`, `final`, `error`).
-- `POST /api/context/preview`, `GET /api/health|models|config|projects`.
-- `POST /v1/chat/completions`: an OpenAI-compatible SSE shim for the Continue extension (model id `csharp-multi-agent`). It sends only the last message as the question, with no project, files or history.
-- Errors: `ApiExceptionHandler` + `ApiErrors.StatusCodeFor` map `InvalidRequestException` → 400, `LanguageModelException` → 502, `LanguageModelTimeoutException` → 504, client abort → 499, anything else → 500. The response is problem details with the message in `detail`, which the UI shows. Streaming endpoints catch errors themselves and write an `error` event or chunk instead.
-- The API never writes project files. Only the VS Code extension (`devagents.applyLast`) writes generated files, after per-file confirmation. Conversation history is kept client-side; the server uses the last `Pipeline:MaxHistoryItems` turns.
+### Configuration
+- Loading order: `appsettings.json` → `config/local.json` → environment variables.
+  - `config/local.json` is looked up at `<contentRoot>/config`, at `<repo>/config` (`dotnet run` from `src/Web`) and at `$DEVAGENTS_CONFIG`.
+  - Everything reads `IOptionsMonitor.CurrentValue`, so changes apply without a restart.
+- Model resolution: request override → `Ollama:Agents:<Role>` → fallback role (Router/BackTranslator → Translator) → `Defaults`.
+- Every request sends `think: false` unless an agent sets `Think: true`. Thinking models such as qwen3.5 otherwise think for tens of seconds and can return an empty answer. Non-thinking models accept `false` but reject `true`.
+- An empty `Workspace:AllowedRoots` allows any local path. Docker sets it to `/workspace`.
 
-### Other
-`projects/CleanArchitecture` is a git submodule gitlink (there is no `.gitmodules`). It is a sample target codebase for the agents, not part of this app. In Docker, `projects/` is mounted at `/workspace` by default and is excluded from the image build context (`.dockerignore`).
+### Tests
+- `Application.UnitTests/Fakes`: `PipelineHarness` wires `AgentPipeline` + `DevelopmentWorkflow` with fakes. `FakeLanguageModel` answers per prompt name, because `FakePromptProvider` returns the prompt name as the system prompt.
+- `Application.FunctionalTests`: `DevAgentsApplicationFactory` uses a temp workspace and data dir, a scripted model, and a sandbox that always succeeds. The real writer and git are used.
+- `Infrastructure.IntegrationTests` use real git, Roslyn, metadata reading and dotnet. Docker tests are `[Category("Slow")]`.
+
+`projects/CleanArchitecture` is a git submodule gitlink (there is no `.gitmodules`). It is the template source for the clean-architecture profile, not part of this app. The template itself uses MediatR 14 and AutoMapper 16, which have commercial licenses, so projects generated from it inherit those.

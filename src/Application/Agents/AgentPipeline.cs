@@ -87,7 +87,11 @@ internal sealed partial class AgentPipeline(
         if (plan.Answer)
             work.Answer = await agents.RunStageAsync(PipelineStages.Answer, AgentRole.Analyzer, AgentPrompts.Answerer, messages.ForAnswer());
         if (plan.Analyze)
-            work.Analysis = await agents.RunStageAsync(PipelineStages.Analyze, AgentRole.Analyzer, AgentPrompts.Analyzer, messages.ForAnalysis());
+        {
+            // Analizdeki uzun kod listeleri atılır: sonraki ajanların bağlamı plana ve gerçek dosyalara kalsın.
+            work.Analysis = ModelOutput.RemoveLongCodeBlocks(
+                await agents.RunStageAsync(PipelineStages.Analyze, AgentRole.Analyzer, AgentPrompts.Analyzer, messages.ForAnalysis()));
+        }
 
         // Soru-cevap: analiz ajanı kritik bir bilgi eksik gördüyse kod yazmadan önce kullanıcıya soruyoruz.
         var questions = askQuestions && plan.Code ? AnalysisQuestions.Extract(work.Analysis) : "";

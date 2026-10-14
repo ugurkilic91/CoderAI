@@ -10,12 +10,14 @@ internal static class OllamaJson
 }
 
 /// <summary>POST /api/chat</summary>
+/// <param name="Think">Düşünen modellerde düşünme açık/kapalı; düşünmeyen modeller "false"u yok sayar ("true"da hata verir).</param>
 internal sealed record OllamaChatRequest(
     string Model,
     bool Stream,
     string KeepAlive,
     IReadOnlyList<OllamaMessage> Messages,
-    OllamaModelOptions Options);
+    OllamaModelOptions Options,
+    bool Think);
 
 internal sealed record OllamaMessage(string Role, string Content);
 

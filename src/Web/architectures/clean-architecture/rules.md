@@ -29,18 +29,26 @@ Create or change exactly these files, mirroring the reference files below:
    `groupBuilder.MapGet(GetHobbies);`, `groupBuilder.MapPost(CreateHobby);`, `groupBuilder.MapPut(UpdateHobby, "{id}");`,
    `groupBuilder.MapDelete(DeleteHobby, "{id}");`. Handlers take `ISender sender` and return `TypedResults`.
    Do NOT call `RequireAuthorization()` unless the request asks for authorization.
-6. **Unit tests** (see Testing).
+   The file needs `using Microsoft.AspNetCore.Http.HttpResults;` (for `Ok<T>`, `Created<T>`, `NoContent`, `NotFound`,
+   `Results<...>`) and one `using <Root>.Application.Hobbies.Commands.<UseCase>;` / `...Queries.<UseCase>;` per use case.
+6. **Unit tests** are written by the separate test agent AFTER the code compiles. When you implement the feature,
+   do NOT output any test file.
 
 Nothing has to be registered by hand: MediatR handlers, validators, AutoMapper profiles and endpoint groups are discovered
 automatically. Do not change Program.cs or any DependencyInjection.cs.
 
 ## Testing
 - Test projects: `tests/Application.UnitTests` (handlers, validators) and `tests/Domain.UnitTests` (pure domain logic).
+- There is NO shared test base class or test fixture in these projects (no `TestBase`, no `Testing` class): every test class
+  creates what it needs itself, exactly like the reference test. Unit test projects have no global usings: write
+  `using NUnit.Framework;`, `using Shouldly;` and the project namespaces explicitly.
 - File path: `tests/Application.UnitTests/<Feature>/Commands/<UseCase>CommandTests.cs` (or `Queries/...`);
   namespace `<Root>.Application.UnitTests.<Feature>.Commands`.
 - NUnit (`[Test]`, `[SetUp]`, `[TearDown]`) with Shouldly assertions (`value.ShouldBe(expected)`).
 - Test handlers against a real `ApplicationDbContext` on in-memory SQLite, exactly like the reference test
-  (no mocks of the DbContext). Test validators by calling `Validate` directly.
+  (no mocks of the DbContext). Test validators by calling `Validate` directly and assert `result.IsValid` and the failing
+  property: `result.Errors.ShouldContain(e => e.PropertyName == "Name")`. Never assert FluentValidation's default error
+  message texts (they differ from what you expect); compare a message only if the validator sets it with `WithMessage`.
 - Queries that need `IMapper`: build one with
   `new MapperConfiguration(cfg => cfg.AddMaps(typeof(<Root>.Application.Common.Interfaces.IApplicationDbContext).Assembly), NullLoggerFactory.Instance).CreateMapper()`
   (`using AutoMapper;` and `using Microsoft.Extensions.Logging.Abstractions;`).

@@ -32,4 +32,10 @@ internal sealed class AgentSettings
 
     /// <summary>Üretilecek en fazla token (Ollama "num_predict").</summary>
     public int? NumPredict { get; set; }
+
+    /// <summary>
+    /// Düşünen modeller (qwen3.5, deepseek-r1...) cevap vermeden önce düşünsün mü (Ollama "think"). Varsayılan false:
+    /// ölçüldü, bir cümlelik çeviri düşünmeyle 38 sn sürüp token bütçesini bitirerek boş dönebiliyor, düşünmeden 1 sn.
+    /// </summary>
+    public bool? Think { get; set; }
 }

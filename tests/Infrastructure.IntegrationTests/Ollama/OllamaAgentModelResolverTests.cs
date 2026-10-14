@@ -48,6 +48,18 @@ public class OllamaAgentModelResolverTests
     }
 
     [Test]
+    public void ShouldKeepThinkingOffUnlessAnAgentAsksForIt()
+    {
+        var resolver = CreateResolver(new OllamaOptions
+        {
+            Agents = new(StringComparer.OrdinalIgnoreCase) { ["Reviewer"] = new AgentSettings { Model = "deepseek-r1:14b", Think = true } }
+        });
+
+        resolver.Resolve(AgentRole.Reviewer).Think.ShouldBeTrue();
+        resolver.Resolve(AgentRole.Translator).Think.ShouldBeFalse();
+    }
+
+    [Test]
     public void ShouldUseBuiltInFallbacksWhenNothingIsConfigured()
     {
         CreateResolver(new OllamaOptions()).Resolve(AgentRole.Tester)

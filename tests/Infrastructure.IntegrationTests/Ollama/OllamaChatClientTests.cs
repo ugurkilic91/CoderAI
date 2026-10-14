@@ -42,8 +42,9 @@ public class OllamaChatClientTests
         tokens.ShouldBe(["Hello", ", world"]);
         var (request, body) = handler.Requests.Single();
         request.RequestUri.ShouldBe(new Uri("http://ollama.test/api/chat"));
+        // "think": false — düşünen modeller (qwen3.5) aksi hâlde her çağrıda uzun süre düşünüyor.
         body.ShouldBe(
-            """{"model":"qwen2.5-coder:14b","stream":true,"keep_alive":"10m","messages":[{"role":"system","content":"system"},{"role":"user","content":"user"}],"options":{"temperature":0.15,"num_ctx":16384,"num_predict":8192}}""");
+            """{"model":"qwen2.5-coder:14b","stream":true,"keep_alive":"10m","messages":[{"role":"system","content":"system"},{"role":"user","content":"user"}],"options":{"temperature":0.15,"num_ctx":16384,"num_predict":8192},"think":false}""");
     }
 
     [Test]

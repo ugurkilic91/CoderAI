@@ -14,6 +14,7 @@ internal sealed class PipelineHarness
     {
         Writer = new FakeProjectWriter(Workspace);
         Tracker = new FakeChangeTracker(Workspace);
+        UsingFixer = new FakeUsingFixer(Workspace);
     }
 
     public FakeLanguageModel Model { get; } = new FakeLanguageModel().Answer("translator-to-en", "Add an order cancel endpoint");
@@ -25,6 +26,8 @@ internal sealed class PipelineHarness
     public FakeProjectWriter Writer { get; }
 
     public FakeChangeTracker Tracker { get; }
+
+    public FakeUsingFixer UsingFixer { get; }
 
     public PipelineOptions PipelineOptions { get; } = new() { TranslateOutput = false };
 
@@ -39,7 +42,7 @@ internal sealed class PipelineHarness
     {
         var developmentOptions = new StaticOptionsMonitor<DevelopmentOptions>(DevelopmentOptions);
         var development = new DevelopmentWorkflow(
-            Writer, Tracker, new FakeSyntaxChecker(), Sandbox, Workspace, new ProjectLocks(), developmentOptions,
+            Writer, Tracker, new FakeSyntaxChecker(), UsingFixer, new FakeMemberRestorer(), Sandbox, Workspace, new ProjectLocks(), developmentOptions,
             NullLogger<DevelopmentWorkflow>.Instance);
         var pipeline = new AgentPipeline(
             Model,

@@ -13,7 +13,7 @@ internal sealed class AgentMessages
 {
     private const int MaxHistoryCodeChars = 6000;
     private const int MaxFixFileChars = 12_000;
-    private const int MaxFixFilesChars = 36_000;
+    private const int MaxFixFilesChars = 30_000;
     private const int MaxStackTraceLines = 6;
 
     private const string NoImplementation =
@@ -28,6 +28,7 @@ internal sealed class AgentMessages
     private readonly string _context;
     private readonly string _architecture;
     private readonly string _architectureRules;
+    private readonly ArchitectureGuide? _guide;
 
     public AgentMessages(
         string englishRequest,
@@ -46,6 +47,7 @@ internal sealed class AgentMessages
         // Mimari seçilmediyse bu bölümler boştur ve mesajlar mimarisiz akıştakiyle birebir aynı kalır.
         _architecture = string.IsNullOrEmpty(architecture?.FullText) ? "" : "\n\n" + architecture.FullText;
         _architectureRules = string.IsNullOrEmpty(architecture?.RulesText) ? "" : "\n\n" + architecture.RulesText;
+        _guide = architecture;
     }
 
     public static string ForRouter(string englishRequest, bool hasProject) =>
@@ -63,9 +65,12 @@ internal sealed class AgentMessages
     public string ForTesting(AgentOutputs work) =>
         $"## REQUEST\n{_request}{Analysis(work)}{Implementation(work)}{_notes}{_architecture}\n\n{_context}";
 
-    public string ForReview(AgentOutputs work) =>
+    /// <param name="verification">Kod projeye uygulandıysa gerçek derleme/test sonuçları (review ajanı derleme hatası aramasın).</param>
+    public string ForReview(AgentOutputs work, string? verification = null) =>
         $"## REQUEST\n{_request}{Analysis(work)}{Implementation(work)}\n\n" +
-        $"## TESTS\n{(work.Tests.Length > 0 ? work.Tests : "(none)")}{_notes}{_architecture}\n\n{_context}";
+        $"## TESTS\n{(work.Tests.Length > 0 ? work.Tests : "(none)")}" +
+        (string.IsNullOrEmpty(verification) ? "" : $"\n\n## BUILD AND TEST RESULTS\n{verification}") +
+        $"{_notes}{_architecture}\n\n{_context}";
 
     public string ForRevision(AgentOutputs work) =>
         $"## REQUEST\n{_request}{Analysis(work)}\n\n## PREVIOUS IMPLEMENTATION\n{work.Code}\n\n" +
@@ -83,14 +88,24 @@ internal sealed class AgentMessages
         "## TASK\nThe project does not compile after the changes made for the request. Fix ALL build errors below with minimal, targeted changes. " +
         "Keep the intent of the request and the architecture.\n\n" +
         $"## REQUEST\n{_request}\n\n## BUILD ERRORS\n{Bullets(errors)}\n\n## CURRENT FILES\n{FileBlocks(currentFiles)}\n\n" +
-        $"## FILES CHANGED FOR THIS REQUEST\n{Bullets(changedPaths)}{_architectureRules}";
+        $"## FILES CHANGED FOR THIS REQUEST\n{Bullets(changedPaths)}{_architectureRules}{Examples(errors.Select(error => error.File))}";
 
     /// <summary>Başarısız birim testleri için: hangi tarafın (kod mu test mi) hatalı olduğuna ajan karar verir.</summary>
     public string ForTestFix(TestRunResult result, IReadOnlyList<GeneratedFile> currentFiles) =>
         "## TASK\nSome unit tests fail. For each failure decide whether the implementation or the test is wrong " +
         "(the REQUEST is the source of truth) and fix that file. Do not delete or weaken tests just to make them pass.\n\n" +
         $"## REQUEST\n{_request}\n\n## FAILING TESTS ({result.Failed} of {result.Total})\n{Failures(result.Failures)}\n\n" +
-        $"## CURRENT FILES\n{FileBlocks(currentFiles)}{_architectureRules}";
+        $"## CURRENT FILES\n{FileBlocks(currentFiles)}{_architectureRules}" +
+        Examples(currentFiles.Where(file => file.Kind == GeneratedFileKind.Test).Select(file => file.Path));
+
+    // Hatalı dosyaların bölümündeki mimari örnekleri (doğru using'ler, test kurulumu); mimari seçilmediyse boş.
+    private string Examples(IEnumerable<string> paths)
+    {
+        var examples = _guide?.ExamplesFor(paths);
+        return string.IsNullOrEmpty(examples)
+            ? ""
+            : $"\n\n## REFERENCE FILES OF THE ARCHITECTURE (copy their usings, base classes and test setup)\n{examples}";
+    }
 
     private static string Analysis(AgentOutputs work) =>
         work.Analysis.Length > 0 ? $"\n\n## ANALYSIS\n{work.Analysis}" : "";

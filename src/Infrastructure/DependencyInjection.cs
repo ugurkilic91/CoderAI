@@ -16,7 +16,7 @@ public static class DependencyInjection
 {
     /// <summary>
     /// Infrastructure katmanını kaydeder: Ollama istemcisi, prompt ve mimari dosyaları, dosya sistemi,
-    /// değişiklik takibi (git), Roslyn sözdizimi kontrolü ve derleme/test sandbox'ı.
+    /// değişiklik takibi (git), Roslyn sözdizimi kontrolü ve eksik using düzeltmesi, derleme/test sandbox'ı.
     /// </summary>
     public static void AddInfrastructureServices(this IHostApplicationBuilder builder)
     {
@@ -34,6 +34,8 @@ public static class DependencyInjection
         builder.Services.AddSingleton<IProjectWriter, FileSystemProjectWriter>();
         builder.Services.AddSingleton<IChangeTracker, GitChangeTracker>();
         builder.Services.AddSingleton<ICodeSyntaxChecker, RoslynSyntaxChecker>();
+        builder.Services.AddSingleton<IUsingDirectiveFixer, UsingDirectiveFixer>();
+        builder.Services.AddSingleton<ICodeMemberRestorer, RoslynMemberRestorer>();
 
         // Sandbox: Docker (varsayılan) ya da Process; hangisinin kullanılacağı her çağrıda "Sandbox:Mode" ayarından okunur.
         builder.Services.AddSingleton<DockerSandboxRunner>();

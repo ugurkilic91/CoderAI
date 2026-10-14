@@ -12,7 +12,7 @@ namespace DevAgents.Infrastructure.CodeAnalysis;
 /// </summary>
 internal sealed class RoslynSyntaxChecker : ICodeSyntaxChecker
 {
-    private static readonly CSharpParseOptions ParseOptions = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
+    internal static readonly CSharpParseOptions ParseOptions = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
 
     public IReadOnlyList<CompilerDiagnostic> Check(IEnumerable<GeneratedFile> files) =>
     [
