@@ -1,7 +1,8 @@
-# Only src/ goes into the image. Keep the build context small and free of local build output
-# (a local obj/ folder would replace the restore done inside the container).
+# İmaja yalnızca kök props dosyaları ve src/ girer. Derleme bağlamını küçük ve yerel derleme çıktılarından
+# temiz tutuyoruz (yereldeki bir obj/ klasörü, konteynerdeki paket geri yüklemesinin yerine geçerdi).
 **/bin/
 **/obj/
+artifacts/
 .git/
 .vs/
 .vscode/

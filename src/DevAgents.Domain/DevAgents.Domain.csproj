@@ -1,8 +1,0 @@
-<Project Sdk="Microsoft.NET.Sdk">
-
-  <!-- The innermost layer: no dependencies on other projects or packages. -->
-  <PropertyGroup>
-    <RootNamespace>DevAgents.Domain</RootNamespace>
-  </PropertyGroup>
-
-</Project>

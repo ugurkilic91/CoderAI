@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!-- Sunum katmanı ve uygulamanın giriş noktası: HTTP uç noktaları, web sohbet arayüzü (wwwroot), ayarlar ve prompt'lar. -->
+  <PropertyGroup>
+    <RootNamespace>DevAgents.Web</RootNamespace>
+    <AssemblyName>DevAgents.Web</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Ajanların sistem prompt'ları: her istekte yeniden okunan, düzenlenebilir metin dosyaları -->
+    <None Update="prompts\**\*.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <!-- Mimari profilleri (kurallar, örnekler, şablon komutları): ekip bunları kod değiştirmeden düzenleyebilir -->
+    <None Update="architectures\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Compile Remove="architectures\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Application\Application.csproj" />
+    <ProjectReference Include="..\Infrastructure\Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <PackageReference Include="Scalar.AspNetCore" />
+  </ItemGroup>
+
+</Project>

@@ -1,8 +1,0 @@
-<Project Sdk="Microsoft.NET.Sdk">
-
-  <!-- Infrastructure against real dependencies where cheap: the file system (temp folders) and HttpClient (stub handler). -->
-  <ItemGroup>
-    <ProjectReference Include="..\..\src\DevAgents.Infrastructure\DevAgents.Infrastructure.csproj" />
-  </ItemGroup>
-
-</Project>

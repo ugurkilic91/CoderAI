@@ -1,0 +1,31 @@
+<!--
+  Merkezi paket sürüm yönetimi (Central Package Management): sürümler yalnızca burada yazılır,
+  .csproj dosyalarında sürümsüz PackageReference kullanılır.
+  Lisans notu: MediatR 12.x Apache-2.0'dır. 13 ve sonrası Lucky Penny Software'in ticari lisansına tabidir,
+  şirket içi kullanımda lisans gerektirmesin diye 12.x'te kalıyoruz.
+-->
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageVersion Include="Ardalis.GuardClauses" Version="5.0.0" />
+    <PackageVersion Include="coverlet.collector" Version="10.1.0" />
+    <PackageVersion Include="FluentValidation.DependencyInjectionExtensions" Version="12.1.1" />
+    <PackageVersion Include="MediatR" Version="12.5.0" />
+    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="5.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+    <PackageVersion Include="Moq" Version="4.21.0" />
+    <PackageVersion Include="NUnit" Version="5.0.0" />
+    <PackageVersion Include="NUnit.Analyzers" Version="4.15.0" />
+    <PackageVersion Include="NUnit3TestAdapter" Version="6.3.0" />
+    <PackageVersion Include="Scalar.AspNetCore" Version="2.17.10" />
+    <PackageVersion Include="Shouldly" Version="4.3.0" />
+  </ItemGroup>
+</Project>

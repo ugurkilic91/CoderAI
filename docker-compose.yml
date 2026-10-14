@@ -21,7 +21,7 @@ services:
     volumes:
       - ${PROJECTS_DIR:-./projects}:/workspace:ro   # projeler salt-okunur bağlanır
       - ./config:/app/config:ro                     # model seçimi: config/local.json
-      - ./src/DevAgents.Api/prompts:/app/prompts:ro # prompt'ları yeniden derlemeden düzenleyin
+      - ./src/Web/prompts:/app/prompts:ro          # prompt'ları yeniden derlemeden düzenleyin
     restart: unless-stopped
 
   ollama:

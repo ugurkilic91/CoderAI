@@ -1,0 +1,5 @@
+<!--
+  Bilerek boş: bu klasördeki projeler DevAgents'in merkezi paket sürüm yönetimini (Central Package Management)
+  devralmasın; kendi .csproj dosyalarındaki paket sürümleriyle derlensinler.
+-->
+<Project />

@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- En içteki katman: hiçbir projeye ya da pakete bağımlı değildir. -->
+  <PropertyGroup>
+    <RootNamespace>DevAgents.Domain</RootNamespace>
+    <AssemblyName>DevAgents.Domain</AssemblyName>
+  </PropertyGroup>
+
+</Project>
