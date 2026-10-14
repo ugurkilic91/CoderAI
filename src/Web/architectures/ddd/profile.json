@@ -1,0 +1,31 @@
+{
+  // Jason Taylor Clean Architecture şablonu (projects/CleanArchitecture). Docker'da /app/projects/CleanArchitecture olarak bağlanır.
+  "name": "DDD",
+  "description": "Jason Taylor şablonu: Domain / Application / Infrastructure / Web katmanları, MediatR komut/sorguları, FluentValidation, AutoMapper, EF Core (SQLite), NUnit + Shouldly testleri.",
+
+  // Yeni proje: şablon sandbox'a kurulur, sonra bu argümanlarla dotnet çalıştırılır ({name} = proje adı).
+  "templateDirectory": "projects/CleanArchitecture",
+  "sourceName": "CleanArchitecture",
+  "newProject": [ "new", "ca-sln", "--client-framework", "None", "--database", "sqlite", "--output", "{name}" ],
+
+  // Uygulama modunda çalıştırılan testler. Fonksiyonel/kabul testleri (Aspire, Playwright) altyapı istediği için dahil değil.
+  "testProjects": [ "tests/Domain.UnitTests", "tests/Application.UnitTests" ],
+
+  // Projeden okunup ajanlara örnek olarak verilen dosyalar (projede yoksa şablondan okunur).
+  "examples": [
+    "src/Domain/Entities/TodoItem.cs",
+    "src/Application/Common/Interfaces/IApplicationDbContext.cs",
+    "src/Infrastructure/Data/ApplicationDbContext.cs",
+    "src/Infrastructure/Data/Configurations/TodoItemConfiguration.cs",
+    "src/Application/TodoItems/Commands/CreateTodoItem/CreateTodoItem.cs",
+    "src/Application/TodoItems/Commands/CreateTodoItem/CreateTodoItemCommandValidator.cs",
+    "src/Application/TodoItems/Commands/UpdateTodoItem/UpdateTodoItem.cs",
+    "src/Web/Endpoints/TodoLists.cs"
+  ],
+
+  // Şablonda karşılığı olmayan kalıplar için örnekler (ajanlara projedeki hedef yollarıyla gösterilir).
+  "extraExamples": [
+    { "file": "examples/GetTodoItems.cs", "path": "src/Application/TodoItems/Queries/GetTodoItems/GetTodoItems.cs" },
+    { "file": "examples/CreateTodoItemCommandTests.cs", "path": "tests/Application.UnitTests/TodoItems/Commands/CreateTodoItemCommandTests.cs" }
+  ]
+}

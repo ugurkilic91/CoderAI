@@ -66,14 +66,14 @@ internal sealed class DotnetBuildSandbox(
 
         // 1) Paket geri yükleme: NuGet'e ulaşmak için ağ açık (paketler kalıcı önbellekte birikir).
         var restore = await Runner.RunAsync(
-            new SandboxCommand(mounts, ProjectMount, ["restore"], Network: true, TimeSpan.FromMinutes(settings.RestoreTimeoutMinutes)),
+            new SandboxCommand(mounts, ProjectMount, ["restore", BuildSettingsArgument()], Network: true, TimeSpan.FromMinutes(settings.RestoreTimeoutMinutes)),
             onOutput, cancellationToken);
         if (restore.ExitCode != 0)
             return Failed(restore, projectRoot, stopwatch);
 
         // 2) Derleme: ağ kapalı; üretilen kodun dışarıyla konuşmasına izin yok.
         var build = await Runner.RunAsync(
-            new SandboxCommand(mounts, ProjectMount, ["build", "--no-restore", "-nologo"], Network: false, TimeSpan.FromMinutes(settings.BuildTimeoutMinutes)),
+            new SandboxCommand(mounts, ProjectMount, ["build", "--no-restore", "-nologo", BuildSettingsArgument()], Network: false, TimeSpan.FromMinutes(settings.BuildTimeoutMinutes)),
             onOutput, cancellationToken);
         return build.ExitCode == 0
             ? new BuildResult(true, [], Tail(build.Output), stopwatch.Elapsed.TotalSeconds)
@@ -95,7 +95,7 @@ internal sealed class DotnetBuildSandbox(
 
             for (var index = 0; index < targets.Count; index++)
             {
-                List<string> arguments = ["test"];
+                List<string> arguments = ["test", BuildSettingsArgument()];
                 if (targets[index].Length > 0)
                     arguments.Add(targets[index]);
                 arguments.AddRange(["--no-build", "--logger", $"trx;LogFileName=result{index}.trx", "--results-directory", ResultsMount]);
@@ -132,6 +132,35 @@ internal sealed class DotnetBuildSandbox(
 
     /// <summary>Sandbox'taki dotnet'in ev klasörünün bu makinedeki yeri: NuGet önbelleği ve kurulu şablonlar burada kalıcıdır.</summary>
     internal static string HomeDirectory(StorageOptions storage) => Path.Combine(storage.ResolveDataDirectory(), "sandbox-home");
+
+    private const string BuildSettingsFile = "devagents.targets";
+
+    /// <summary>
+    /// Sandbox derlemesine özel MSBuild ayarları; projenin dosyalarına dokunmadan her projenin sonunda içe aktarılır:
+    /// - NuGet güvenlik açığı uyarıları (NU190x) TreatWarningsAsErrors ile hataya dönmesin: bunlar ajanın kodundan değil
+    ///   paket sürümlerinden gelir, düzeltme ajanı çözemez (uyarı olarak çıktıda kalır).
+    /// - Aspire AppHost projeleri derlenirken Aspire CLI paketini indirmeye çalışmasın: ağ kapalı sandbox'ta derleme kırılıyor.
+    /// </summary>
+    private const string BuildSettings = """
+        <Project>
+          <PropertyGroup>
+            <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1900;NU1901;NU1902;NU1903;NU1904;ASPIRE010</WarningsNotAsErrors>
+            <AspireUseCliBundle>false</AspireUseCliBundle>
+          </PropertyGroup>
+        </Project>
+        """;
+
+    // Ayar dosyasını ev klasörüne yazar ve dotnet'e verilecek argümanı döndürür (Docker'da konteyner yolu, Process'te yerel yol).
+    private string BuildSettingsArgument()
+    {
+        var path = Path.Combine(CreateSharedDirectory(HomeDirectory(storage.CurrentValue)), BuildSettingsFile);
+        if (!File.Exists(path) || File.ReadAllText(path) != BuildSettings)
+            File.WriteAllText(path, BuildSettings);
+        var target = string.Equals(options.CurrentValue.Mode, SandboxOptions.ProcessMode, StringComparison.OrdinalIgnoreCase)
+            ? path
+            : $"{DockerSandboxRunner.SandboxHome}/{BuildSettingsFile}";
+        return $"-p:CustomAfterMicrosoftCommonTargets={target}";
+    }
 
     private SandboxMount Home() =>
         new(CreateSharedDirectory(HomeDirectory(storage.CurrentValue)), DockerSandboxRunner.SandboxHome, ReadOnly: false);

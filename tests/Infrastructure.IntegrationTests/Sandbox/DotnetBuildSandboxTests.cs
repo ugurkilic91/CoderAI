@@ -65,4 +65,26 @@ public class DotnetBuildSandboxTests
         fixedBuild.Succeeded.ShouldBeTrue();
         fixedBuild.Errors.ShouldBeEmpty();
     }
+
+    [TestCase(SandboxOptions.ProcessMode)]
+    [TestCase(SandboxOptions.DockerMode)]
+    public async Task ShouldNotFailTheBuildOnPackageVulnerabilityWarnings(string mode)
+    {
+        var sandbox = CreateSandbox(mode);
+        var status = await sandbox.GetStatusAsync(CancellationToken.None);
+        Assume.That(status.Available, $"{mode} sandbox kullanılamıyor: {status.Message}");
+        // Uyarılar hata sayılıyor ve paketin bilinen bir güvenlik açığı var (NU1903): bu ajanın kodundan kaynaklanmaz.
+        File.WriteAllText(Path.Combine(_project, "Lib.csproj"), """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup><TargetFramework>net10.0</TargetFramework><Nullable>enable</Nullable><TreatWarningsAsErrors>true</TreatWarningsAsErrors></PropertyGroup>
+              <ItemGroup><PackageReference Include="Newtonsoft.Json" Version="12.0.3" /></ItemGroup>
+            </Project>
+            """);
+        File.WriteAllText(Path.Combine(_project, "Features", "Hobby.cs"), "namespace Lib;\npublic class Hobby { public string? Name { get; set; } }\n");
+
+        var build = await sandbox.BuildAsync(_project, null, CancellationToken.None);
+
+        build.Errors.ShouldBeEmpty();
+        build.Succeeded.ShouldBeTrue();
+    }
 }
